@@ -77,17 +77,9 @@ class SQLOutput(BaseModel):
 
 # ── LLM factory ───────────────────────────────────────────────────────────────
 
-def _get_llm(provider, openai_model, ollama_model, ollama_base_url):
-    if provider == "openai":
-        from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model=openai_model, api_key=os.environ.get("OPENAI_API_KEY"), temperature=0)
-    elif provider == "ollama":
-        from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model=ollama_model, base_url=ollama_base_url, api_key="ollama", temperature=0)
-    elif provider == "claude":
-        from langchain_anthropic import ChatAnthropic
-        return ChatAnthropic(model="claude-sonnet-4-6", api_key=os.environ.get("ANTHROPIC_API_KEY"), temperature=0)
-    raise ValueError(f"Unknown provider: {provider}")
+def _get_llm(openai_model: str):
+    from langchain_openai import ChatOpenAI
+    return ChatOpenAI(model=openai_model, api_key=os.environ.get("OPENAI_API_KEY"), temperature=0)
 
 
 # ── Node: check_relevance ─────────────────────────────────────────────────────
@@ -304,15 +296,12 @@ def run_agent(
     executor: QueryExecutor,
     dialect: str = "SQLite",
     chat_history: list = None,
-    provider: str = "openai",
-    openai_model: str = "gpt-4o-mini",
-    ollama_model: str = "llama3",
-    ollama_base_url: str = "http://localhost:11434/v1",
+    openai_model: str = "gpt-4o",
     retriever: Optional[Any] = None,
     value_reference: str = "",
 ) -> dict:
 
-    llm = _get_llm(provider, openai_model, ollama_model, ollama_base_url)
+    llm = _get_llm(openai_model)
     compiled = build_graph(llm, executor)
 
     final = compiled.invoke({

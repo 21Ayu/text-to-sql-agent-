@@ -58,10 +58,7 @@ _STATE_DEFAULTS = {
     "value_reference": "",
     "chat_history": [],
     "messages": [],
-    "llm_provider": "ollama",
     "openai_model": "gpt-4o-mini",
-    "ollama_model": os.getenv("OLLAMA_MODEL", "llama3"),
-    "ollama_base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
     # Persistence state
     "persisted_excel_name": None,
     "persisted_context_name": None,
@@ -182,46 +179,17 @@ with st.sidebar:
 
     # ── LLM Provider ──────────────────────────────────────────────────────────
     st.header("LLM Provider")
-    provider = st.radio(
-        "Choose AI provider",
-        ["Ollama (Free, Local)", "OpenAI", "Claude"],
-        index=0,
+    openai_key_input = st.text_input(
+        "OpenAI API Key",
+        type="password",
+        value=os.getenv("OPENAI_API_KEY", ""),
+        help="Required for SQL generation and RAG embeddings.",
     )
-
-    if provider == "OpenAI":
-        openai_key_input = st.text_input(
-            "OpenAI API Key",
-            type="password",
-            value=os.getenv("OPENAI_API_KEY", ""),
-            help="Required for both LLM and RAG embeddings.",
-        )
-        openai_model = st.selectbox("Model", ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"], index=0)
-        if openai_key_input:
-            os.environ["OPENAI_API_KEY"] = openai_key_input
-        st.session_state.llm_provider = "openai"
-        st.session_state.openai_model = openai_model
-
-    elif provider == "Claude":
-        claude_key = st.text_input(
-            "Anthropic API Key",
-            type="password",
-            value=os.getenv("ANTHROPIC_API_KEY", ""),
-            help="Get from https://console.anthropic.com",
-        )
-        if claude_key:
-            os.environ["ANTHROPIC_API_KEY"] = claude_key
-        st.session_state.llm_provider = "claude"
-
-    else:  # Ollama
-        ollama_url = st.text_input("Ollama URL", value=st.session_state.ollama_base_url)
-        ollama_model = st.text_input(
-            "Model name", value=st.session_state.ollama_model,
-            help="e.g. llama3, mistral, codellama",
-        )
-        st.session_state.llm_provider = "ollama"
-        st.session_state.ollama_base_url = ollama_url
-        st.session_state.ollama_model = ollama_model
-        st.info("Ollama must be running locally.\nRun: `ollama serve`")
+    if openai_key_input:
+        os.environ["OPENAI_API_KEY"] = openai_key_input
+    st.session_state.openai_model = st.selectbox(
+        "Model", ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"], index=0
+    )
 
     st.divider()
 
@@ -419,10 +387,7 @@ if question:
                 executor=st.session_state.executor,
                 dialect=dialect,
                 chat_history=st.session_state.chat_history,
-                provider=st.session_state.llm_provider,
                 openai_model=st.session_state.openai_model,
-                ollama_model=st.session_state.ollama_model,
-                ollama_base_url=st.session_state.ollama_base_url,
                 retriever=st.session_state.retriever,
                 value_reference=st.session_state.value_reference,
             )
