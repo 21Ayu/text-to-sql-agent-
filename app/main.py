@@ -7,6 +7,7 @@ All uploaded files are persisted to disk and reloaded automatically on restart.
 
 import sys
 import os
+import re
 import glob
 import shutil
 import tempfile
@@ -76,6 +77,19 @@ for key, default in _STATE_DEFAULTS.items():
 
 def _openai_key() -> str:
     return os.environ.get("OPENAI_API_KEY", "")
+
+
+def _csv_download_button(df, title: str, key: str) -> None:
+    """Render a CSV download button for a DataFrame."""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", title).strip("_").lower() or "query_result"
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="Download CSV",
+        data=csv_bytes,
+        file_name=f"{slug}.csv",
+        mime="text/csv",
+        key=key,
+    )
 
 
 def _build_retriever(openai_key: str = None) -> RAGRetriever:
@@ -373,7 +387,7 @@ if st.session_state.executor is None:
     st.stop()
 
 # Render existing messages
-for msg in st.session_state.messages:
+for _msg_idx, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("sql"):
@@ -383,6 +397,11 @@ for msg in st.session_state.messages:
             st.plotly_chart(msg["fig"], use_container_width=True)
         if msg.get("df") is not None:
             st.dataframe(msg["df"], use_container_width=True)
+            _csv_download_button(
+                msg["df"],
+                title=msg.get("title", "query_result"),
+                key=f"dl_{_msg_idx}",
+            )
 
 # Chat input
 question = st.chat_input("Ask a business question...")
@@ -449,8 +468,10 @@ if question:
                     st.warning(classify_error(str(e), context="chart"))
                     fig = None
                 st.dataframe(df, use_container_width=True)
+                _csv_download_button(df, title=result["title"], key="dl_inline")
             else:
                 st.dataframe(df, use_container_width=True)
+                _csv_download_button(df, title=result["title"], key="dl_inline")
 
             content = (
                 f"**{result['title']}** — no rows returned."
@@ -465,6 +486,7 @@ if question:
                 "sql": result["sql"],
                 "df": df,
                 "fig": fig,
+                "title": result["title"],
             })
             st.session_state.chat_history.append({"role": "user", "content": question})
             st.session_state.chat_history.append({
