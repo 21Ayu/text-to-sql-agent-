@@ -1,0 +1,235 @@
+## GLOBAL CONTEXT
+This is a loyalty and rewards platform database for a fintech/rewards app.
+Users earn reward points (RP) by placing orders, using promo codes, and referring friends.
+Users redeem reward points to purchase gift cards from partner brands.
+OMS = Order Management System. GC = Gift Card module. RP = Reward Points.
+Monetary amounts are stored in paise (divide by 100 for rupees).
+Soft-deleted records have is_deleted=1 or soft_delete=1 - always exclude these.
+Active records have is_active=1.
+
+## users
+Core user table. Every registered customer on the platform.
+Use for: user counts, registrations over time, referral analysis, blacklist checks.
+- id: Unique user ID. Primary key. Join with other tables using this.
+- name: Full name of the user.
+- email: Email address.
+- mobile: Phone number used for login.
+- created_at: Registration timestamp. Use for signup trends.
+- referred_by: Referral code used during signup.
+- referral_used: 1 if user signed up using a referral code.
+- referred_by_user: User ID of who referred this user.
+- is_deleted: 1 if account deactivated. Always filter WHERE is_deleted = 0.
+- is_blacklisted: 1 if user is banned from the platform.
+- is_purchase_blacklisted: 1 if blocked from purchases only.
+Example questions: How many users registered this month? Daily signup trend? Top referrers? Active users count?
+
+## oms_orders
+All customer purchase orders. OMS = Order Management System.
+Use for: revenue, order volumes, order status breakdown, partner performance.
+- id: Unique order ID.
+- user_id: User who placed this order. Links to users.id.
+- order_no: Human-readable order reference number.
+- partner_id: Merchant who fulfilled the order. Links to partners.id.
+- category_id: Product category.
+- total_price: Price before discounts (in paise).
+- total_payable_price: Final amount paid after discounts (in paise). This is revenue.
+- conv_fee: Convenience fee (in paise).
+- delivery_fee: Delivery fee (in paise).
+- status: Exact values are 'FULFILLMENT_COMPLETED' (successful order), 'ORDER_INITIATED' (order started), 'PAYMENT_INITIATED' (payment in progress), 'PAYMENT_FAILED' (payment failed), 'PAYMENT_FORFEITED' (payment abandoned), 'REFUND_PENDING' (refund queued), 'REFUND_SUCCESSFUL' (refunded), 'FRAUD_FAILURE_REFUND_SUCCESSFUL' (fraud refund). Always use these exact strings. For successful orders use status = 'FULFILLMENT_COMPLETED'.
+- created_at: Order placement timestamp.
+Example questions: Total revenue? Orders today? Daily trend? Failure rate? Average order value? Orders per partner?
+
+## oms_order_items
+Line items within each order. One order can have multiple items.
+Use for: product-level analysis, quantities, per-item revenue.
+- id: Unique item ID.
+- order_id: Links to oms_orders.id.
+- item_id: Product identifier.
+- sku_id: Stock keeping unit.
+- quantity: Units ordered.
+- unit_price: Price per unit (in paise).
+- total_price: quantity x unit_price (in paise).
+- payable_price: Amount charged after discounts (in paise).
+- soft_delete: 1 if soft-deleted.
+Example questions: Most ordered products? Average order quantity? Top revenue SKUs?
+
+## oms_transactions
+Payment transaction records. Every payment attempt for every order.
+Use for: payment success rates, refund analysis, gateway performance, UPI vs card split.
+- id: Unique transaction ID.
+- order_id: Links to oms_orders.id.
+- user_id: User who paid.
+- transaction_amount: Amount charged (in paise).
+- currency: Currency code, usually INR.
+- payment_method: UPI, CARD, WALLET, NETBANKING.
+- payment_gateway: RAZORPAY, PAYU.
+- transaction_status: Exact values are 'SUCCESS' (payment succeeded), 'FAILED' (payment failed). Use transaction_status = 'SUCCESS' for successful payments.
+- transaction_date: Payment timestamp.
+- is_refunded: 1 if refunded.
+- utr: Bank transaction reference.
+- upi_id: UPI ID used if payment was UPI.
+Example questions: Payment success rate? Failed transactions today? UPI vs card split? Total refunds? Best gateway?
+
+## reward_transactions
+History of every reward point event. CREDIT = earned, DEBIT = redeemed or expired.
+Use for: points earned/redeemed analysis, loyalty engagement, reward liability.
+- id: Unique reward transaction ID.
+- user_id: User whose points changed. Links to users.id.
+- partner_id: Associated partner.
+- reward_point: Points amount. Positive = earned, negative = redeemed.
+- type: CREDIT or DEBIT.
+- sub_type: PURCHASE, REFERRAL, SIGNUP, REDEMPTION, EXPIRY, ADJUSTMENT.
+- event_name: Triggering event e.g. ORDER_COMPLETE, REFERRAL_BONUS, SIGNUP_BONUS.
+- balance: Running balance after this transaction.
+- ref_num: Reference to the triggering order or event.
+- is_expired: 1 if points have expired.
+- is_consumed: 1 if points were redeemed.
+- created_at: When this reward event occurred.
+Example questions: Points earned this month? Redemption rate? Most rewarding event? Total reward liability?
+
+## user_balance_reward_points
+Current reward point balance per user per partner.
+Use for: balance distribution, top earners, outstanding points liability.
+- user_id: Links to users.id.
+- partner_id: Links to partners.id.
+- total_rp: Current available reward point balance.
+- is_redeemable: 1 if points can be redeemed now.
+Example questions: Top 10 users by reward points? Total reward liability? Users with more than 1000 points?
+
+## gc_order
+Gift card purchase orders. Each row is one gift card purchase.
+Use for: gift card sales volume, revenue, popular brands.
+- id: Unique gift card order ID.
+- user_id: Buyer. Links to users.id.
+- status: Exact values are 'COMPLETE' (successful), 'FAILED' (failed). Use status = 'COMPLETE' for successful gift card orders.
+- total_amount: Face value (in paise).
+- total_effective_amount: Amount paid after discount (in paise).
+- total_reward_amount: Reward points earned from this purchase.
+- sku_id: Gift card product. Links to gc_catalogue.id.
+- redemption_type: ONLINE or IN_STORE.
+- created_at: Purchase timestamp.
+Example questions: Gift cards sold this month? Total gift card revenue? Most popular brands? Average order value?
+
+## gc_catalogue
+Gift card product catalogue. Every gift card type available for purchase.
+Use for: active products, inventory levels, brand coverage.
+- id: Unique catalogue item ID.
+- title: Brand name e.g. Amazon, Flipkart, Swiggy, Zomato, Myntra.
+- is_active: 1 if available. Filter WHERE is_active = 1 for live catalogue.
+- is_deleted: 1 if removed.
+- redemption_type: ONLINE, IN_STORE, or BOTH.
+- inventory: Current stock count.
+- priority: Display order (lower = shown first).
+Example questions: Active gift cards count? Available brands? Out of stock cards?
+
+## gc_activated_card
+Issued gift card codes given to users after purchase.
+Use for: issued vs redeemed analysis, expiry tracking.
+- amount: Face value (in paise).
+- used: 1 if redeemed.
+- used_date: When card was used.
+- expiry_date: Card expiry.
+- partner_id: Issuing brand.
+- sku_id: Product this card belongs to.
+Example questions: Unused cards count? Cards expiring this month? Redemption rate?
+
+## partners
+Partner organisations on the platform - merchants, brands, service providers.
+Use for: partner performance, active count, revenue by partner.
+- id: Unique partner ID. Foreign key used across tables.
+- partner_name: Full name of the partner.
+- balance: Partner wallet balance (in paise).
+- is_order_active: 1 if currently accepting orders.
+Example questions: Active partners count? Partner with most orders? Partner balance distribution?
+
+## promo_codes
+Promotional discount codes on the platform.
+Use for: active promotions, promo structure, expiry analysis.
+- promo_code: The code string users enter e.g. SAVE20, FIRSTORDER.
+- discount_type: FLAT or PERCENTAGE.
+- discount_percentage: Percentage discount.
+- min_order_amount: Minimum order value to apply (in paise).
+- max_discount_amount: Maximum discount cap (in paise).
+- start_date: Valid from date.
+- end_date: Expiry date.
+- is_active: 1 if currently usable.
+- usage_type: SINGLE_USE, MULTI_USE, or USER_SPECIFIC.
+Example questions: Active promo codes? Promos expiring soon? Single-use vs multi-use count?
+
+## promo_ledger
+Record of every promo code application by a user.
+Use for: promo usage counts, total discounts given, most popular codes.
+- promo_code: Code that was applied.
+- mobile_no: Mobile number of user who used it.
+- is_used: 1 if successfully applied.
+- ref_num: Order reference this promo was applied to.
+- created_at: When the promo was used.
+Example questions: How many times was each promo used? Total discount given? Most popular promo?
+
+## loyalty_capture
+Loyalty points from external programs linked by users e.g. airline miles, hotel points.
+- user_id: Links to users.id.
+- loyalty_brand_id: Which program. Links to loyalty_brand.id.
+- points: Current balance.
+- expiry: When points expire.
+- last_updated: Last sync timestamp.
+Example questions: Users with linked loyalty programs? Total loyalty points? Top loyalty program?
+
+## loyalty_brand
+External loyalty program configurations.
+- loyalty_name: Name of the loyalty program.
+- currency_name: Points currency e.g. Miles, Stars.
+- conversion_factor: Loyalty points per 1 platform reward point.
+- is_active: 1 if active.
+Example questions: Active loyalty programs? Conversion rates?
+
+## reward_point_config
+Rules for how many reward points are awarded per event per partner.
+- partner_id: Which partner this rule applies to.
+- event_name: Business event e.g. ORDER_COMPLETE, REFERRAL, SIGNUP.
+- reward_point: Base points awarded.
+- custom_multiplier: Multiplier on base.
+- is_active: 1 if rule is active.
+- expiry_time: Days until earned points expire.
+Example questions: Points earned per order? Which events give most points? Active reward rules?
+
+## otp_credits
+OTP usage tracking and daily limits per user.
+- user_id: Links to users.id.
+- daily_credits_remaining: OTPs left today.
+- total_credits_used: Lifetime OTPs sent.
+- is_blocked: 1 if blocked from OTPs.
+- blocked_until: When OTP block expires.
+Example questions: OTP blocked users? Daily OTP consumption?
+
+## audit_log
+System audit trail for every significant admin action.
+- table_name: Database table affected.
+- type: INSERT, UPDATE, or DELETE.
+- user_id: Who performed the action.
+- timestamp: When it occurred.
+- action_performed: What was done.
+Example questions: Changes made today? Most active admin? Records deleted this week?
+
+## brands
+Brand master table for gift cards and loyalty programs.
+- id: Unique brand ID.
+- name: Brand name e.g. Amazon, Flipkart, Swiggy.
+Example questions: How many brands? List all brands.
+
+## registered_reward_partner
+External partners integrating via API to issue or consume reward points.
+- partner_code: Short unique code.
+- partner_name: Full partner name.
+- category: RETAIL, TRAVEL, FOOD, ENTERTAINMENT.
+- is_active: 1 if active.
+- is_api_enabled: 1 if API access enabled.
+Example questions: Active reward partners? Partner categories? API-enabled partners?
+
+## third_party_request_log
+Log of outbound API calls to external services.
+- third_party_name: External service name.
+- method: HTTP method.
+- timestamp: When the call was made.
+- uri: Endpoint called.
+Example questions: Third-party calls today? Most called services? Failed external calls?

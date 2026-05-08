@@ -1,0 +1,110 @@
+## successful_orders_count
+Q: How many successful orders are there? / Total successful orders / Count of completed orders
+SQL: SELECT COUNT(*) AS total_successful_orders FROM oms_orders WHERE status = 'FULFILLMENT_COMPLETED' AND is_deleted = 0
+
+## orders_today
+Q: How many orders were placed today?
+SQL: SELECT COUNT(*) AS orders_today FROM oms_orders WHERE DATE(created_at) = CURDATE() AND is_deleted = 0
+
+## revenue_today
+Q: What is the total revenue today? / Total sales today
+SQL: SELECT SUM(total_payable_price)  AS revenue_today FROM oms_orders WHERE status = 'FULFILLMENT_COMPLETED' AND DATE(created_at) = CURDATE() AND is_deleted = 0
+
+## revenue_this_month
+Q: Total revenue this month / Monthly revenue
+SQL: SELECT SUM(total_payable_price) AS revenue_this_month_rupees FROM oms_orders WHERE status = 'FULFILLMENT_COMPLETED' AND MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE()) AND is_deleted = 0
+
+## daily_order_trend
+Q: Show daily order trend / Orders per day this month / Daily order count
+SQL: SELECT DATE(created_at) AS order_date, COUNT(*) AS total_orders FROM oms_orders WHERE is_deleted = 0 AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) GROUP BY DATE(created_at) ORDER BY order_date
+
+## failed_payments
+Q: How many payments failed today? / Failed transactions today
+SQL: SELECT COUNT(*) AS failed_payments FROM oms_transactions WHERE transaction_status = 'PAYMENT_FAILED' AND DATE(transaction_date) = CURDATE()
+
+## payment_success_rate
+Q: What is the payment success rate? / Payment success percentage
+SQL: SELECT ROUND(SUM(CASE WHEN transaction_status = 'SUCCESS' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS success_rate_pct FROM oms_transactions
+
+## payment_method_split
+Q: UPI vs card split / Payment method breakdown / Which payment method is most used?
+SQL: SELECT payment_method, COUNT(*) AS transaction_count, ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) AS pct FROM oms_transactions WHERE transaction_status = 'SUCCESS' GROUP BY payment_method ORDER BY transaction_count DESC
+
+## new_users_today
+Q: How many new users registered today? / User signups today
+SQL: SELECT COUNT(*) AS new_users_today FROM users WHERE DATE(created_at) = CURDATE() AND is_deleted = 0
+
+## new_users_this_month
+Q: New user registrations this month / Monthly signups
+SQL: SELECT COUNT(*) AS new_users_this_month FROM users WHERE MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE()) AND is_deleted = 0
+
+## daily_signup_trend
+Q: Daily signup trend / User registrations per day
+SQL: SELECT DATE(created_at) AS signup_date, COUNT(*) AS new_users FROM users WHERE is_deleted = 0 AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) GROUP BY DATE(created_at) ORDER BY signup_date
+
+## top_users_by_orders
+Q: Top 10 users by number of orders / Most active users
+SQL: SELECT u.name, u.mobile, COUNT(o.id) AS order_count FROM oms_orders o JOIN users u ON o.user_id = u.id WHERE o.status = 'FULFILLMENT_COMPLETED' AND o.is_deleted = 0 AND u.is_deleted = 0 GROUP BY o.user_id, u.name, u.mobile ORDER BY order_count DESC LIMIT 10
+
+## reward_points_earned_this_month
+Q: Total reward points earned this month / Points issued this month
+SQL: SELECT SUM(reward_point) AS total_points_earned FROM reward_transactions WHERE type = 'CREDIT' AND MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())
+
+## reward_points_redeemed_this_month
+Q: Total reward points redeemed this month / Points consumed this month
+SQL: SELECT SUM(ABS(reward_point)) AS total_points_redeemed FROM reward_transactions WHERE type = 'DEBIT' AND sub_type = 'REDEMPTION' AND MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())
+
+## top_users_by_reward_points
+Q: Top 10 users by reward point balance / Users with most points / Highest reward point holders
+SQL: SELECT u.name, u.mobile, b.total_rp FROM user_balance_reward_points b JOIN users u ON b.user_id = u.id WHERE u.is_deleted = 0 AND b.is_redeemable = 1 ORDER BY b.total_rp DESC LIMIT 10
+
+## gift_cards_sold_this_month
+Q: How many gift cards were sold this month? / Gift card sales this month
+SQL: SELECT COUNT(*) AS gift_cards_sold FROM gc_order WHERE status = 'COMPLETE' AND MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())
+
+## gift_card_revenue_this_month
+Q: Total gift card revenue this month / Gift card sales value
+SQL: SELECT SUM(total_effective_amount) / 100 AS gc_revenue_rupees FROM gc_order WHERE status = 'COMPLETE' AND MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())
+
+## popular_gift_card_brands
+Q: Most popular gift card brands / Top selling gift cards / Which gift cards sell most?
+SQL: SELECT c.title AS brand, COUNT(o.id) AS orders, SUM(o.total_effective_amount) / 100 AS revenue_rupees FROM gc_order o JOIN gc_catalogue c ON o.sku_id = c.id WHERE o.status = 'COMPLETE' GROUP BY o.sku_id, c.title ORDER BY orders DESC LIMIT 10
+
+## active_promo_codes
+Q: Which promo codes are active? / Active promotions / Current discount codes
+SQL: SELECT promo_code, discount_type, discount_percentage, max_discount_amount / 100 AS max_discount_rupees, end_date FROM promo_codes WHERE is_active = 1 AND end_date >= CURDATE() ORDER BY end_date
+
+## promo_usage_count
+Q: How many times was each promo code used? / Most popular promo codes / Promo usage stats
+SQL: SELECT promo_code, COUNT(*) AS times_used FROM promo_ledger WHERE is_used = 1 GROUP BY promo_code ORDER BY times_used DESC LIMIT 20
+
+## orders_by_status
+Q: Order breakdown by status / How many orders are in each status?
+SQL: SELECT status, COUNT(*) AS count FROM oms_orders WHERE is_deleted = 0 GROUP BY status ORDER BY count DESC
+
+## average_order_value
+Q: What is the average order value? / AOV / Average transaction size
+SQL: SELECT ROUND(AVG(total_payable_price) / 100, 2) AS avg_order_value_rupees FROM oms_orders WHERE status = 'FULFILLMENT_COMPLETED' AND is_deleted = 0
+
+## refunds_this_month
+Q: Total refunds this month / Refund amount this month
+SQL: SELECT COUNT(*) AS refund_count, SUM(transaction_amount) / 100 AS refund_amount_rupees FROM oms_transactions WHERE is_refunded = 1 AND MONTH(transaction_date) = MONTH(CURDATE()) AND YEAR(transaction_date) = YEAR(CURDATE())
+
+## active_partners
+Q: How many active partners are there? / Active merchants / Partners accepting orders
+SQL: SELECT COUNT(*) AS active_partners FROM partners WHERE is_order_active = 1
+
+## top_partners_by_revenue
+Q: Top partners by revenue / Best performing partners / Partners with most sales
+SQL: SELECT p.partner_name, COUNT(o.id) AS order_count, SUM(o.total_payable_price) / 100 AS revenue_rupees FROM oms_orders o JOIN partners p ON o.partner_id = p.id WHERE o.status = 'FULFILLMENT_COMPLETED' AND o.is_deleted = 0 GROUP BY o.partner_id, p.partner_name ORDER BY revenue_rupees DESC LIMIT 10
+
+## blacklisted_users
+Q: How many users are blacklisted? / Banned users count
+SQL: SELECT COUNT(*) AS blacklisted_users FROM users WHERE is_blacklisted = 1 AND is_deleted = 0
+
+
+## Brand wise distribution of gift cards 
+Q: Brand wise distribution of purchased gift cards ? Number of successful gift cards purchase brand wise 
+SQL:  select gt.title , count(*) from gc_order as gc left join gc_catalogue as gt on gc.sku_id = gt.id where status = "Complete" group by gt.title order by count(*) desc 
+
+

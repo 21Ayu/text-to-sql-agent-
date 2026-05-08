@@ -1,0 +1,245 @@
+# Business context for the newdata database.
+# This file tells the AI what each table and column means in business terms.
+# Edit descriptions to match your business — the more detail, the better queries.
+
+tables:
+  users:
+    description: "Registered app users. Each row is one customer account."
+    columns:
+      id: "Unique user ID"
+      uid: "External/public user identifier"
+      name: "Full name of the user"
+      email: "Email address"
+      mobile: "Mobile phone number"
+      dob: "Date of birth"
+      referred_by: "Referral code used during signup"
+      referral_used: "1 if user signed up using a referral code"
+      is_deleted: "1 if user account has been deleted/deactivated"
+      is_blacklisted: "1 if user is blocked from the platform"
+      is_purchase_blacklisted: "1 if user is blocked from making purchases"
+      created_at: "Date and time the user registered"
+
+  oms_orders:
+    description: "All customer orders placed on the platform (OMS = Order Management System). Each row is one order."
+    columns:
+      id: "Unique order ID"
+      user_id: "ID of the user who placed the order (links to users.id)"
+      order_no: "Human-readable order number"
+      partner_id: "Partner/merchant who fulfilled the order (links to partners.id)"
+      category_id: "Category of the order"
+      total_price: "Total price before any discounts"
+      total_payable_price: "Final amount the user paid after discounts"
+      conv_fee: "Convenience fee charged"
+      delivery_fee: "Delivery fee charged"
+      status: "Order status e.g. COMPLETED, PENDING, FAILED, CANCELLED"
+      is_tipped: "1 if user added a tip"
+      promo: "Promo/discount details applied to this order (JSON)"
+      created_at: "Date and time the order was placed"
+
+  oms_order_items:
+    description: "Individual line items within each order. One order can have multiple items."
+    columns:
+      id: "Unique item ID"
+      order_id: "Links to oms_orders.id"
+      order_no: "Order number this item belongs to"
+      item_id: "Product/item ID"
+      category_id: "Category of this item"
+      quantity: "Number of units ordered"
+      unit_price: "Price per unit"
+      total_price: "Total price for this line (quantity × unit_price)"
+      payable_price: "Amount actually paid after discounts"
+      status: "Item fulfillment status"
+      sku_id: "Stock keeping unit identifier"
+
+  oms_transactions:
+    description: "Payment transaction records for orders. Each row is one payment attempt."
+    columns:
+      id: "Unique transaction ID"
+      order_id: "Links to oms_orders.id"
+      order_no: "Order number for this transaction"
+      user_id: "User who made the payment"
+      transaction_id: "Gateway-assigned transaction ID"
+      transaction_amount: "Amount charged in this transaction"
+      currency: "Currency code e.g. INR, USD"
+      payment_method: "Payment method used e.g. UPI, card, wallet"
+      payment_gateway: "Payment gateway used e.g. Razorpay, PayU"
+      transaction_status: "Status: SUCCESS, FAILED, PENDING, REFUNDED"
+      transaction_date: "Date and time of the transaction"
+      is_refunded: "1 if this transaction was refunded"
+      utr: "Unique Transaction Reference number from bank"
+
+  reward_transactions:
+    description: "History of reward points earned or redeemed by users. Each row is one reward event."
+    columns:
+      id: "Unique reward transaction ID"
+      user_id: "User who earned/redeemed points (links to users.id)"
+      partner_id: "Partner associated with this reward"
+      reward_point: "Number of reward points in this transaction (positive = earned, negative = redeemed)"
+      type: "CREDIT (earned) or DEBIT (redeemed/expired)"
+      sub_type: "More specific type e.g. PURCHASE, REFERRAL, SIGNUP, REDEMPTION"
+      event_name: "Business event that triggered this reward e.g. ORDER_COMPLETE"
+      display_name: "Human-readable label for this transaction"
+      balance: "Running reward point balance after this transaction"
+      ref_num: "Reference number linking to the triggering order or event"
+      is_expired: "1 if these points have expired"
+      is_consumed: "1 if these points have been used"
+      expired_date: "Date these points expire"
+      created_at: "Date and time reward was issued"
+
+  user_balance_reward_points:
+    description: "Current reward point balance for each user per partner. One row per user per partner."
+    columns:
+      user_id: "Links to users.id"
+      partner_id: "Links to partners.id"
+      total_rp: "Current total reward points balance available to the user"
+      is_redeemable: "1 if user can redeem these points right now"
+
+  gc_order:
+    description: "Gift card purchase orders. Each row is one gift card order placed by a user."
+    columns:
+      id: "Unique gift card order ID"
+      order_no: "Human-readable gift card order number"
+      user_id: "User who purchased the gift card"
+      status: "Order status: COMPLETED, PENDING, FAILED"
+      total_amount: "Total face value of gift cards in this order (in paise/smallest currency unit)"
+      total_effective_amount: "Actual amount paid by user after discount"
+      total_reward_amount: "Reward points earned from this order"
+      sku_id: "Gift card product ID (links to gc_catalogue.id)"
+      redemption_type: "How the gift card is redeemed: ONLINE or IN_STORE"
+      created_at: "Date and time the gift card order was placed"
+
+  gc_catalogue:
+    description: "Gift card product catalogue. Each row is one type of gift card available for purchase."
+    columns:
+      id: "Unique gift card product ID"
+      title: "Brand/product name of the gift card e.g. Amazon, Flipkart"
+      sub_title: "Short description"
+      sku: "Stock keeping unit code"
+      partner_id: "Issuing partner"
+      is_active: "1 if this gift card is currently available for purchase"
+      redemption_type: "ONLINE, IN_STORE, or BOTH"
+      inventory: "Number of gift cards currently in stock"
+      priority: "Display order priority (lower = shown first)"
+
+  gc_activated_card:
+    description: "Actual issued/activated gift card codes. Each row is one physical gift card code."
+    columns:
+      id: "Unique activated card ID"
+      card_number: "The gift card number (encrypted)"
+      card_pin: "The gift card PIN (encrypted)"
+      amount: "Face value of this gift card"
+      effective_amount: "Discounted price paid"
+      used: "1 if this card has been used/redeemed"
+      used_date: "Date the card was used"
+      expiry_date: "Date this gift card expires"
+      partner_id: "Gift card brand/partner"
+      sku_id: "Product this card belongs to"
+
+  partners:
+    description: "Partner organisations (merchants, brands) on the platform."
+    columns:
+      id: "Unique partner ID"
+      partner_name: "Name of the partner/merchant"
+      client_id: "OAuth client ID for API access"
+      balance: "Partner's wallet balance on the platform"
+      is_order_active: "1 if this partner is currently accepting orders"
+      created_at: "Date partner was onboarded"
+
+  promo_codes:
+    description: "Promotional discount codes available on the platform."
+    columns:
+      id: "Unique promo code ID"
+      promo_code: "The discount code string e.g. SAVE20"
+      discount_type: "FLAT (fixed amount) or PERCENTAGE"
+      discount_percentage: "Discount percentage if type is PERCENTAGE"
+      min_order_amount: "Minimum order value required to use this code"
+      max_discount_amount: "Maximum discount that can be applied"
+      start_date: "Date from which this promo is valid"
+      end_date: "Date after which this promo expires"
+      is_active: "1 if this promo code is currently active"
+      usage_type: "SINGLE_USE, MULTI_USE, or USER_SPECIFIC"
+
+  promo_ledger:
+    description: "Record of every time a promo code was used by a user."
+    columns:
+      id: "Unique ledger entry ID"
+      promo_code: "The promo code that was used"
+      mobile_no: "Mobile number of the user who used it"
+      is_used: "1 if the promo was successfully applied"
+      discount_type: "Type of discount applied"
+      discount_percentage: "Percentage discount applied"
+      ref_num: "Reference to the order this promo was applied to"
+      created_at: "Date and time the promo was used"
+
+  loyalty_capture:
+    description: "Tracks loyalty points a user has accumulated from external loyalty programs linked to the platform."
+    columns:
+      user_id: "Links to users.id"
+      loyalty_brand_id: "Which loyalty program (links to loyalty_brand.id)"
+      points: "Current points balance in this loyalty program"
+      tracked_times: "Number of times loyalty points were synced/updated"
+      expiry: "When these loyalty points expire"
+      last_updated: "Last time points were synced"
+
+  loyalty_brand:
+    description: "External loyalty programs integrated with the platform e.g. airline miles, hotel points."
+    columns:
+      id: "Unique loyalty brand ID"
+      loyalty_name: "Name of the loyalty program"
+      currency_name: "Name of the loyalty currency e.g. Miles, Points"
+      conversion_factor: "How many loyalty points equal 1 platform reward point"
+      is_active: "1 if this loyalty program is currently active"
+
+  currency_partner:
+    description: "Configuration for reward currency partners and their conversion rates."
+    columns:
+      id: "Unique currency partner ID"
+      partner_name: "Name of the currency/reward partner"
+      currency_name: "Name of the reward currency"
+      currency_code: "Short code for the currency"
+      conversion_value: "How much 1 reward point is worth in this currency"
+      is_active: "1 if this currency partner is active"
+
+  audit_log:
+    description: "System audit trail — records every significant action performed in the admin panel or by users."
+    columns:
+      table_name: "Which database table was affected"
+      type: "Type of operation: INSERT, UPDATE, DELETE"
+      user_id: "Who performed the action"
+      timestamp: "When the action occurred"
+      action_performed: "Description of what was done"
+      previous_state: "The data before the change (JSON)"
+
+  otp_credits:
+    description: "Tracks OTP (one-time password) usage limits per user to prevent abuse."
+    columns:
+      user_id: "Links to users.id"
+      mobile: "Mobile number"
+      daily_credits_remaining: "OTPs remaining today"
+      total_credits_used: "Total OTPs sent to this user ever"
+      is_blocked: "1 if user is blocked from receiving OTPs"
+      blocked_until: "When the OTP block expires"
+
+  registered_reward_partner:
+    description: "External partners who can issue or consume reward points via API."
+    columns:
+      id: "Unique partner ID"
+      partner_code: "Short code identifying this partner"
+      partner_name: "Full name of the reward partner"
+      category: "Type of partner e.g. RETAIL, TRAVEL, FOOD"
+      is_active: "1 if this partner is active"
+      is_api_enabled: "1 if this partner has API access enabled"
+
+# Global business context — always included in every prompt
+global_context: |
+  This is a loyalty and rewards platform database.
+  Users earn reward points by placing orders, using promo codes, and referrals.
+  Users can redeem reward points to purchase gift cards from the gc_catalogue.
+  Partners are merchants/brands who sell products or issue gift cards on the platform.
+  OMS prefix = Order Management System (handles all purchases).
+  GC prefix = Gift Card module.
+  RP = Reward Points.
+  Amounts are stored in the smallest currency unit (paise for INR = 1/100 of a rupee).
+  Dates are stored in IST (Indian Standard Time).
+  Soft-deleted records have is_deleted=1 or soft_delete=1 — always exclude these unless asked.
+  Active records typically have is_active=1.

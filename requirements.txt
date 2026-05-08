@@ -1,0 +1,17 @@
+streamlit
+python-dotenv
+langchain-core
+langchain-openai
+langchain-anthropic
+langchain-chroma
+langgraph
+chromadb
+openai
+anthropic
+pandas
+openpyxl
+sqlalchemy
+pymysql
+plotly
+pypdf
+pydantic
