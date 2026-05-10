@@ -10,6 +10,9 @@ import os
 import re
 import glob
 
+# Ensure project root is on the path before any app.* imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -20,8 +23,6 @@ from app.chart_renderer import render_chart
 from app.rag_retriever import RAGRetriever
 from app.errors import classify_error
 
-# Ensure project root is on the path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv()
 
 # Load Streamlit Cloud secrets into os.environ (no-op locally)
