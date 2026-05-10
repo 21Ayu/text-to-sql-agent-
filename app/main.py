@@ -179,16 +179,7 @@ if not st.session_state._auto_load_done:
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
 
-    # ── LLM Provider ──────────────────────────────────────────────────────────
-    st.header("LLM Provider")
-    openai_key_input = st.text_input(
-        "OpenAI API Key",
-        type="password",
-        value=os.getenv("OPENAI_API_KEY", ""),
-        help="Required for SQL generation and RAG embeddings.",
-    )
-    if openai_key_input:
-        os.environ["OPENAI_API_KEY"] = openai_key_input
+    # ── Model selection ───────────────────────────────────────────────────────
     st.session_state.openai_model = st.selectbox(
         "Model", ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"], index=0
     )
