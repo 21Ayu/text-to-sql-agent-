@@ -1,6 +1,6 @@
 """
 Streamlit UI for the Text-to-SQL AI Agent.
-Supports Excel file upload and MySQL database connection.
+Excel-only mode — upload an .xlsx file, ask questions in plain English.
 Context is provided entirely by the user via an uploaded document (txt/pdf).
 All uploaded files are persisted to disk and reloaded automatically on restart.
 """
@@ -9,13 +9,10 @@ import sys
 import os
 import re
 import glob
-import shutil
-import tempfile
 
 import streamlit as st
 from dotenv import load_dotenv
 
-from app.schema_extractor import extract_mysql_schema, build_mysql_engine, extract_value_reference
 from app.data_loader import reload_excel
 from app.executor import QueryExecutor
 from app.graph_agent import run_agent
@@ -26,6 +23,13 @@ from app.errors import classify_error
 # Ensure project root is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv()
+
+# Load Streamlit Cloud secrets into os.environ (no-op locally)
+try:
+    for _k, _v in st.secrets.items():
+        os.environ.setdefault(_k, str(_v))
+except Exception:
+    pass
 
 # ── Upload directories (persisted across sessions) ────────────────────────────
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -50,12 +54,10 @@ st.caption("Ask business questions in plain English. Get SQL, tables, and charts
 _STATE_DEFAULTS = {
     "source_type": None,
     "sqlite_conn": None,
-    "mysql_engine": None,
     "schema": None,
     "executor": None,
     "retriever": None,
     "rag_status": "",
-    "value_reference": "",
     "chat_history": [],
     "messages": [],
     "openai_model": "gpt-4o-mini",
@@ -122,7 +124,6 @@ def _load_excel_file(file_path: str) -> bool:
             persisted_excel_name=os.path.basename(file_path),
             chat_history=[],
             messages=[],
-            value_reference="",
         )
         return True
     except Exception as e:
@@ -195,98 +196,32 @@ with st.sidebar:
 
     # ── Data Source ───────────────────────────────────────────────────────────
     st.header("Data Source")
-    source = st.radio("Choose source", ["Excel File", "MySQL Database"], horizontal=True)
 
-    if source == "Excel File":
-        if st.session_state.persisted_excel_name and st.session_state.source_type == "excel":
-            st.success(f"Loaded: {st.session_state.persisted_excel_name}")
-            with st.expander("Schema"):
-                st.code(st.session_state.schema or "")
-            if st.button("Clear Excel file"):
-                for old in glob.glob(os.path.join(_EXCEL_DIR, "*")):
-                    try:
-                        os.remove(old)
-                    except Exception:
-                        pass
-                st.session_state.update(
-                    source_type=None, sqlite_conn=None, schema=None,
-                    executor=None, persisted_excel_name=None,
-                    chat_history=[], messages=[],
-                )
-                st.rerun()
-
-        uploaded = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"])
-        if uploaded:
-            saved_path = _save_uploaded_file(uploaded, _EXCEL_DIR)
-            if _load_excel_file(saved_path):
-                st.success(f"Loaded: {uploaded.name}")
-                with st.expander("Schema detected"):
-                    st.code(st.session_state.schema or "")
-                st.rerun()
-
-    else:  # MySQL
-        if st.session_state.source_type == "mysql" and st.session_state.mysql_engine:
-            st.success(f"Connected to MySQL")
-            with st.expander("Schema"):
-                st.code(st.session_state.schema or "")
-
-        with st.form("mysql_form"):
-            host = st.text_input("Host", value=os.getenv("MYSQL_HOST", "localhost"))
-            port = st.number_input("Port", value=int(os.getenv("MYSQL_PORT", 3306)), step=1)
-            user = st.text_input("User", value=os.getenv("MYSQL_USER", "root"))
-            password = st.text_input("Password", type="password", value=os.getenv("MYSQL_PASSWORD", ""))
-            database = st.text_input("Database", value=os.getenv("MYSQL_DATABASE", ""))
-            connect_btn = st.form_submit_button("Connect")
-
-        if connect_btn:
-            try:
-                engine = build_mysql_engine(host, int(port), user, password, database)
-                schema_str = extract_mysql_schema(engine)
-                st.session_state.update(
-                    source_type="mysql",
-                    mysql_engine=engine,
-                    schema=schema_str,
-                    executor=QueryExecutor("mysql", mysql_engine=engine),
-                    value_reference="",
-                    chat_history=[],
-                    messages=[],
-                )
-                st.success(f"Connected to `{database}`")
-                with st.expander("Schema detected"):
-                    st.code(schema_str)
-            except Exception as e:
-                st.error(classify_error(str(e), context="db_connect"))
-
-        # Column value sampling — only shown when MySQL is connected
-        if st.session_state.source_type == "mysql" and st.session_state.mysql_engine:
-            st.divider()
-            with st.expander("Column Value Sampling"):
-                st.caption(
-                    "Select tables to scan for enum/status values. "
-                    "Sampled values are injected into the prompt so the model uses exact values."
-                )
+    if st.session_state.persisted_excel_name and st.session_state.source_type == "excel":
+        st.success(f"Loaded: {st.session_state.persisted_excel_name}")
+        with st.expander("Schema"):
+            st.code(st.session_state.schema or "")
+        if st.button("Clear Excel file"):
+            for old in glob.glob(os.path.join(_EXCEL_DIR, "*")):
                 try:
-                    from sqlalchemy import inspect as sa_inspect
-                    all_tables = sa_inspect(st.session_state.mysql_engine).get_table_names()
-                    selected_tables = st.multiselect(
-                        "Tables to scan",
-                        options=all_tables,
-                        default=[],
-                        help="Only low-cardinality text columns (≤25 distinct values) are sampled.",
-                    )
-                    if st.button("Sample values") and selected_tables:
-                        with st.spinner("Scanning..."):
-                            ref = extract_value_reference(st.session_state.mysql_engine, selected_tables)
-                        if ref:
-                            st.session_state.value_reference = ref
-                            st.success(f"Sampled {len(selected_tables)} table(s).")
-                        else:
-                            st.info("No low-cardinality columns found in the selected tables.")
-                    if st.session_state.value_reference:
-                        with st.expander("Sampled values"):
-                            st.code(st.session_state.value_reference)
-                except Exception as e:
-                    st.warning(f"Could not list tables: {e}")
+                    os.remove(old)
+                except Exception:
+                    pass
+            st.session_state.update(
+                source_type=None, sqlite_conn=None, schema=None,
+                executor=None, persisted_excel_name=None,
+                chat_history=[], messages=[],
+            )
+            st.rerun()
+
+    uploaded = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"])
+    if uploaded:
+        saved_path = _save_uploaded_file(uploaded, _EXCEL_DIR)
+        if _load_excel_file(saved_path):
+            st.success(f"Loaded: {uploaded.name}")
+            with st.expander("Schema detected"):
+                st.code(st.session_state.schema or "")
+            st.rerun()
 
     st.divider()
 
@@ -380,16 +315,14 @@ if question:
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            dialect = "MySQL" if st.session_state.source_type == "mysql" else "SQLite"
             result = run_agent(
                 user_question=question,
                 schema=st.session_state.schema,
                 executor=st.session_state.executor,
-                dialect=dialect,
+                dialect="SQLite",
                 chat_history=st.session_state.chat_history,
                 openai_model=st.session_state.openai_model,
                 retriever=st.session_state.retriever,
-                value_reference=st.session_state.value_reference,
             )
 
         if not result.get("is_relevant", True):
