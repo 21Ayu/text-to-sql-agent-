@@ -215,6 +215,16 @@ with st.sidebar:
         key=f"excel_uploader_{st.session_state._excel_uploader_key}",
     )
     if uploaded and uploaded.name != st.session_state.persisted_excel_name:
+        size_mb = uploaded.size / (1024 * 1024)
+        if size_mb > 50:
+            st.error(
+                f"**Large file ({size_mb:.1f} MB)** — this may exhaust available memory on "
+                "Streamlit Cloud and cause a crash. Consider trimming the file to under 50 MB."
+            )
+        elif size_mb > 20:
+            st.warning(
+                f"**Moderate file size ({size_mb:.1f} MB)** — loading may take 15–30 seconds."
+            )
         saved_path = _save_uploaded_file(uploaded, _EXCEL_DIR)
         if _load_excel_file(saved_path):
             st.session_state._just_loaded_excel = uploaded.name
