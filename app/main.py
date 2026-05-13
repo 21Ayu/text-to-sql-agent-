@@ -67,6 +67,8 @@ _STATE_DEFAULTS = {
     "persisted_context_name": None,
     "confirm_replace_context": False,
     "_auto_load_done": False,
+    "_just_loaded_excel": None,
+    "_excel_uploader_key": 0,
 }
 for key, default in _STATE_DEFAULTS.items():
     if key not in st.session_state:
@@ -204,15 +206,19 @@ with st.sidebar:
                 executor=None, persisted_excel_name=None,
                 chat_history=[], messages=[],
             )
+            st.session_state._excel_uploader_key += 1
             st.rerun()
 
-    uploaded = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"])
-    if uploaded:
+    uploaded = st.file_uploader(
+        "Upload Excel (.xlsx)",
+        type=["xlsx"],
+        key=f"excel_uploader_{st.session_state._excel_uploader_key}",
+    )
+    if uploaded and uploaded.name != st.session_state.persisted_excel_name:
         saved_path = _save_uploaded_file(uploaded, _EXCEL_DIR)
         if _load_excel_file(saved_path):
-            st.success(f"Loaded: {uploaded.name}")
-            with st.expander("Schema detected"):
-                st.code(st.session_state.schema or "")
+            st.session_state._just_loaded_excel = uploaded.name
+            st.session_state._excel_uploader_key += 1
             st.rerun()
 
     st.divider()
@@ -280,6 +286,14 @@ if st.session_state.executor is None:
             "understand your data (business rules, column meanings, example questions)."
         )
     st.stop()
+
+# Show one-time banner after Excel upload
+if st.session_state._just_loaded_excel:
+    st.success(
+        f"**'{st.session_state._just_loaded_excel}' is ready!** "
+        "Ask a question below to start querying your data."
+    )
+    st.session_state._just_loaded_excel = None
 
 # Render existing messages
 for _msg_idx, msg in enumerate(st.session_state.messages):
