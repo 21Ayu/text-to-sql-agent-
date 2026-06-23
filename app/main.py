@@ -107,6 +107,23 @@ def _csv_download_button(df, title: str, key: str) -> None:
     )
 
 
+def _copy_sql_button(sql: str, key: str) -> None:
+    """Offer the generated SQL for copy/reuse.
+
+    The code block above already has Streamlit's native copy-to-clipboard icon
+    (top-right on hover). This adds an explicit, always-reliable way to grab the
+    query as a .sql file — robust across Streamlit versions, unlike a custom JS
+    clipboard button (which needs the now-deprecated components.html iframe)."""
+    st.caption("Use the copy icon on the code block above, or download the query:")
+    st.download_button(
+        label="⬇ Download .sql",
+        data=sql.encode("utf-8"),
+        file_name="generated_query.sql",
+        mime="application/sql",
+        key=key,
+    )
+
+
 def _build_retriever(openai_key: str = None) -> RAGRetriever:
     return RAGRetriever(
         embedding_provider="openai",
@@ -455,6 +472,7 @@ for _msg_idx, msg in enumerate(st.session_state.messages):
         if msg.get("sql"):
             if msg.get("generate_only"):
                 st.code(msg["sql"], language="sql")
+                _copy_sql_button(msg["sql"], key=f"copy_{_msg_idx}")
             else:
                 with st.expander("Generated SQL"):
                     st.code(msg["sql"], language="sql")
@@ -507,6 +525,7 @@ if question:
         elif _generate_only:
             # No data source — show the generated SQL only.
             st.code(result["sql"], language="sql")
+            _copy_sql_button(result["sql"], key="copy_inline")
             content = f"**{result['title']}** — generated SQL (not executed; no data source connected)."
             st.markdown(content)
             st.session_state.messages.append({
