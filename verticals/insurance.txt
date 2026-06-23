@@ -1,0 +1,267 @@
+# Insurance Database — Schema Context for SQL Generation
+
+> **Purpose of this file:** This document describes the full database schema, table
+> relationships, column semantics, and conventions. Use it as authoritative context
+> when translating natural-language questions into SQL queries. When a question is
+> ambiguous, prefer the interpretation consistent with the relationships and value
+> domains defined here.
+
+---
+
+## 1. Database Overview
+
+This is an **insurance company operational database**. It tracks customers, the
+insurance products they buy (policies), the premium payments and claims associated
+with those policies, claim settlements, the sales agents who sell policies, company
+branches, and customer support interactions.
+
+**Dialect note:** The DDL below uses ANSI/MySQL-compatible types. Adjust `AUTO_INCREMENT`,
+`DECIMAL`, and date functions to your target engine (MySQL, PostgreSQL, SQL Server, etc.).
+
+### Table summary
+
+| # | Table | Grain (one row = ) | Key FKs |
+|---|-------|--------------------|---------|
+| 1 | `Customers` | one customer | — |
+| 2 | `Insurance_Products` | one insurance plan/product | — |
+| 3 | `Policies` | one purchased policy | `customer_id`, `product_id` |
+| 4 | `Premium_Payments` | one premium payment transaction | `policy_id` |
+| 5 | `Claims` | one claim raised | `policy_id` |
+| 6 | `Claim_Settlements` | one settlement of a claim | `claim_id` |
+| 7 | `Insurance_Agents` | one sales agent | — |
+| 8 | `Policy_Sales` | one policy-sale-by-agent record | `policy_id`, `agent_id` |
+| 9 | `Branches` | one company branch | — |
+| 10 | `Customer_Interactions` | one support interaction | `customer_id`, `branch_id` |
+
+---
+
+## 2. Relationships (how to JOIN)
+
+```
+Customers ─┐
+           ├──< Policies >── Insurance_Products
+           │       │
+           │       ├──< Premium_Payments
+           │       ├──< Claims ──< Claim_Settlements
+           │       └──< Policy_Sales >── Insurance_Agents
+           │
+           └──< Customer_Interactions >── Branches
+```
+
+Join keys:
+
+- `Policies.customer_id`        → `Customers.customer_id`
+- `Policies.product_id`         → `Insurance_Products.product_id`
+- `Premium_Payments.policy_id`  → `Policies.policy_id`
+- `Claims.policy_id`            → `Policies.policy_id`
+- `Claim_Settlements.claim_id`  → `Claims.claim_id`
+- `Policy_Sales.policy_id`      → `Policies.policy_id`
+- `Policy_Sales.agent_id`       → `Insurance_Agents.agent_id`
+- `Customer_Interactions.customer_id` → `Customers.customer_id`
+- `Customer_Interactions.branch_id`   → `Branches.branch_id`
+
+> A customer reaches a product or agent only **through** a policy. To link a customer
+> to an agent, go: `Customers → Policies → Policy_Sales → Insurance_Agents`.
+
+---
+
+## 3. Table Definitions (DDL)
+
+```sql
+-- 1. Customers — customer demographic information
+CREATE TABLE Customers (
+    customer_id       INT PRIMARY KEY,            -- Unique customer identifier (e.g., 1001)
+    first_name        VARCHAR(50),                -- Customer first name (e.g., 'Ayush')
+    last_name         VARCHAR(50),                -- Customer surname (e.g., 'Kourav')
+    gender            VARCHAR(10),                -- 'Male' / 'Female'
+    dob               DATE,                       -- Date of birth (e.g., '1998-05-12')
+    city              VARCHAR(50),                -- Customer city (e.g., 'Gurgaon')
+    state             VARCHAR(50),                -- State (e.g., 'Haryana')
+    mobile_number     VARCHAR(15),                -- Contact number
+    email             VARCHAR(100),               -- Email ID
+    registration_date DATE                        -- Customer onboarding date
+);
+
+-- 2. Insurance_Products — available insurance plans
+CREATE TABLE Insurance_Products (
+    product_id        INT PRIMARY KEY,            -- Product identifier (e.g., 201)
+    product_name      VARCHAR(100),               -- Plan name (e.g., 'Health Shield Gold')
+    insurance_type    VARCHAR(50),                -- Health / Life / Vehicle / Home
+    coverage_amount   DECIMAL(15,2),              -- Maximum coverage (e.g., 500000.00)
+    annual_premium    DECIMAL(10,2),              -- Yearly premium (e.g., 12000.00)
+    launch_date       DATE                        -- Product launch date
+);
+
+-- 3. Policies — policies purchased by customers
+CREATE TABLE Policies (
+    policy_id         INT PRIMARY KEY,            -- Unique policy identifier (e.g., 5001)
+    customer_id       INT,                        -- FK → Customers
+    product_id        INT,                        -- FK → Insurance_Products
+    policy_number     VARCHAR(30),                -- e.g., 'HLT20240001'
+    start_date        DATE,                       -- Policy start date
+    end_date          DATE,                       -- Policy expiry date
+    policy_status     VARCHAR(20),                -- Active / Lapsed / Expired / Cancelled
+    sum_assured       DECIMAL(15,2),              -- Sum assured
+    premium_amount    DECIMAL(10,2),              -- Premium for this policy
+    CONSTRAINT fk_pol_customer FOREIGN KEY (customer_id) REFERENCES Customers(customer_id),
+    CONSTRAINT fk_pol_product  FOREIGN KEY (product_id)  REFERENCES Insurance_Products(product_id)
+);
+
+-- 4. Premium_Payments — premium payment transactions
+CREATE TABLE Premium_Payments (
+    payment_id        INT PRIMARY KEY,            -- Unique payment identifier
+    policy_id         INT,                        -- FK → Policies
+    payment_date      DATE,                       -- Date payment was made
+    amount_paid       DECIMAL(10,2),              -- Amount paid (e.g., 12000.00)
+    payment_mode      VARCHAR(20),                -- UPI / Card / NetBanking / Cash / Cheque
+    payment_status    VARCHAR(20),                -- Success / Failed / Pending
+    CONSTRAINT fk_pay_policy FOREIGN KEY (policy_id) REFERENCES Policies(policy_id)
+);
+
+-- 5. Claims — claims raised by customers
+CREATE TABLE Claims (
+    claim_id          INT PRIMARY KEY,            -- Unique claim identifier
+    policy_id         INT,                        -- FK → Policies
+    claim_date        DATE,                       -- Date claim was raised
+    claim_amount      DECIMAL(12,2),              -- Amount claimed (e.g., 50000.00)
+    claim_reason      VARCHAR(255),               -- Reason / description of the claim
+    claim_status      VARCHAR(20),                -- Approved / Rejected / Pending / Under Review
+    CONSTRAINT fk_clm_policy FOREIGN KEY (policy_id) REFERENCES Policies(policy_id)
+);
+
+-- 6. Claim_Settlements — final settlement details
+CREATE TABLE Claim_Settlements (
+    settlement_id        INT PRIMARY KEY,         -- Unique settlement identifier
+    claim_id             INT,                     -- FK → Claims
+    approved_amount      DECIMAL(12,2),           -- Amount approved (e.g., 45000.00)
+    settlement_date      DATE,                    -- Date of settlement
+    settlement_status    VARCHAR(20),             -- Settled / Partially Settled / Rejected
+    settlement_time_days INT,                     -- Days from claim to settlement (e.g., 12)
+    CONSTRAINT fk_set_claim FOREIGN KEY (claim_id) REFERENCES Claims(claim_id)
+);
+
+-- 7. Insurance_Agents — sales agents
+CREATE TABLE Insurance_Agents (
+    agent_id          INT PRIMARY KEY,            -- Unique agent identifier (e.g., 301)
+    agent_name        VARCHAR(100),               -- e.g., 'Rahul Sharma'
+    joining_date      DATE,                       -- Agent joining date
+    city              VARCHAR(50),                -- Agent base city
+    experience_years  INT,                        -- Years of experience
+    designation       VARCHAR(50)                 -- e.g., Senior Agent / Manager
+);
+
+-- 8. Policy_Sales — which agent sold which policy
+CREATE TABLE Policy_Sales (
+    sale_id           INT PRIMARY KEY,            -- Unique sale record identifier
+    policy_id         INT,                        -- FK → Policies
+    agent_id          INT,                        -- FK → Insurance_Agents
+    sale_date         DATE,                       -- Date of sale
+    commission_amount DECIMAL(10,2),              -- Commission earned (e.g., 1500.00)
+    CONSTRAINT fk_sale_policy FOREIGN KEY (policy_id) REFERENCES Policies(policy_id),
+    CONSTRAINT fk_sale_agent  FOREIGN KEY (agent_id)  REFERENCES Insurance_Agents(agent_id)
+);
+
+-- 9. Branches — company branch information
+CREATE TABLE Branches (
+    branch_id         INT PRIMARY KEY,            -- Unique branch identifier
+    branch_name       VARCHAR(100),               -- e.g., 'Delhi Central Branch'
+    city              VARCHAR(50),                -- Branch city
+    state             VARCHAR(50),                -- Branch state
+    manager_name      VARCHAR(100)                -- Branch manager
+);
+
+-- 10. Customer_Interactions — customer support interactions
+CREATE TABLE Customer_Interactions (
+    interaction_id     INT PRIMARY KEY,           -- Unique interaction identifier
+    customer_id        INT,                       -- FK → Customers
+    branch_id          INT,                       -- FK → Branches
+    interaction_date   DATE,                      -- Date of interaction
+    interaction_type   VARCHAR(50),               -- Complaint / Enquiry / Service Request / Feedback
+    resolution_status  VARCHAR(20),               -- Resolved / Pending / Escalated
+    satisfaction_score INT                        -- Typically 1–5 (or 1–10)
+);
+```
+
+---
+
+## 4. Categorical Value Domains (likely valid values)
+
+> These are **inferred** from the sample examples and typical insurance domains. They
+> guide value matching but may not be exhaustive — if a query returns no rows, consider
+> that the stored value may differ in casing or wording (e.g., use case-insensitive or
+> `LIKE` matching when unsure).
+
+| Column | Likely values |
+|--------|---------------|
+| `Customers.gender` | `Male`, `Female` |
+| `Insurance_Products.insurance_type` | `Health`, `Life`, `Vehicle`, `Home` |
+| `Policies.policy_status` | `Active`, `Lapsed`, `Expired`, `Cancelled` |
+| `Premium_Payments.payment_mode` | `UPI`, `Card`, `NetBanking`, `Cash`, `Cheque` |
+| `Premium_Payments.payment_status` | `Success`, `Failed`, `Pending` |
+| `Claims.claim_status` | `Approved`, `Rejected`, `Pending`, `Under Review` |
+| `Claim_Settlements.settlement_status` | `Settled`, `Partially Settled`, `Rejected` |
+| `Customer_Interactions.interaction_type` | `Complaint`, `Enquiry`, `Service Request`, `Feedback` |
+| `Customer_Interactions.resolution_status` | `Resolved`, `Pending`, `Escalated` |
+
+---
+
+## 5. Conventions & Hints for Query Generation
+
+- **Money columns** (`coverage_amount`, `annual_premium`, `sum_assured`, `premium_amount`,
+  `amount_paid`, `claim_amount`, `approved_amount`, `commission_amount`) are `DECIMAL`.
+  Use `SUM`, `AVG`, `ROUND` as needed; do not treat them as integers.
+- **Dates** are `DATE` (no time component). For "last 30 days" / "this year" use the target
+  engine's date functions (e.g., MySQL `CURDATE()`, Postgres `CURRENT_DATE`).
+- **Active policies** = `policy_status = 'Active'`. "Currently active" may also imply
+  `start_date <= CURRENT_DATE AND end_date >= CURRENT_DATE`.
+- **Customer full name**: concatenate `first_name` and `last_name`.
+- **Approval/settlement ratios**: a claim links to its settlement via
+  `Claims.claim_id = Claim_Settlements.claim_id`. Not every claim necessarily has a
+  settlement — use `LEFT JOIN` when counting unsettled claims.
+- **Agent performance**: total commission and policies sold come from `Policy_Sales`
+  grouped by `agent_id`, joined to `Insurance_Agents` for names.
+- **Customer-to-agent / customer-to-product** questions must route through `Policies`.
+- Prefer **explicit `JOIN ... ON`** syntax over comma joins.
+- Use **table aliases** for readability (e.g., `Customers c`, `Policies p`).
+
+---
+
+## 6. Example Natural-Language → SQL Patterns
+
+**"List all active health policies with the customer's name."**
+```sql
+SELECT c.first_name, c.last_name, p.policy_number, ip.product_name, p.sum_assured
+FROM Policies p
+JOIN Customers c           ON p.customer_id = c.customer_id
+JOIN Insurance_Products ip ON p.product_id  = ip.product_id
+WHERE p.policy_status = 'Active'
+  AND ip.insurance_type = 'Health';
+```
+
+**"Total premium collected per payment mode in 2024."**
+```sql
+SELECT payment_mode, SUM(amount_paid) AS total_collected
+FROM Premium_Payments
+WHERE payment_status = 'Success'
+  AND payment_date >= '2024-01-01' AND payment_date < '2025-01-01'
+GROUP BY payment_mode
+ORDER BY total_collected DESC;
+```
+
+**"Top 5 agents by total commission."**
+```sql
+SELECT a.agent_id, a.agent_name, SUM(ps.commission_amount) AS total_commission
+FROM Policy_Sales ps
+JOIN Insurance_Agents a ON ps.agent_id = a.agent_id
+GROUP BY a.agent_id, a.agent_name
+ORDER BY total_commission DESC
+LIMIT 5;
+```
+
+**"Average settlement time for approved claims."**
+```sql
+SELECT AVG(cs.settlement_time_days) AS avg_settlement_days
+FROM Claims cl
+JOIN Claim_Settlements cs ON cl.claim_id = cs.claim_id
+WHERE cl.claim_status = 'Approved';
+```

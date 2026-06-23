@@ -1,0 +1,176 @@
+# Car Loan Database — Schema Context for SQL Generation
+
+> ⚠️ **STARTER TEMPLATE — REPLACE WITH YOUR REAL SCHEMA.** The tables, columns,
+> and values below are a plausible starting point for a car-loan / auto-lending
+> domain. Edit them to match your actual database before relying on generated SQL.
+>
+> **Purpose of this file:** Authoritative context for translating natural-language
+> questions into SQL for the Car Loan vertical.
+
+---
+
+## 1. Database Overview
+
+Operational database for **car (auto) loans**. It tracks loan applicants, the loan
+applications they submit, disbursed loans, the financed vehicle, EMI repayment
+transactions, and the dealers through whom loans originate.
+
+### Table summary
+
+| # | Table | Grain (one row = ) | Key FKs |
+|---|-------|--------------------|---------|
+| 1 | `Applicants` | one loan applicant | — |
+| 2 | `Loan_Applications` | one application | `applicant_id`, `dealer_id` |
+| 3 | `Loans` | one disbursed loan | `application_id`, `vehicle_id` |
+| 4 | `Vehicles` | one financed vehicle | — |
+| 5 | `EMI_Payments` | one EMI repayment | `loan_id` |
+| 6 | `Dealers` | one dealership | — |
+
+---
+
+## 2. Relationships (how to JOIN)
+
+```
+Applicants ──< Loan_Applications >── Dealers
+                      │
+                      └──< Loans >── Vehicles
+                              └──< EMI_Payments
+```
+
+Join keys:
+
+- `Loan_Applications.applicant_id` → `Applicants.applicant_id`
+- `Loan_Applications.dealer_id`    → `Dealers.dealer_id`
+- `Loans.application_id`           → `Loan_Applications.application_id`
+- `Loans.vehicle_id`              → `Vehicles.vehicle_id`
+- `EMI_Payments.loan_id`          → `Loans.loan_id`
+
+---
+
+## 3. Table Definitions (DDL)
+
+```sql
+-- 1. Applicants — loan applicants / borrowers
+CREATE TABLE Applicants (
+    applicant_id   INT PRIMARY KEY,       -- Unique applicant identifier
+    full_name      VARCHAR(100),          -- Applicant name
+    dob            DATE,                  -- Date of birth
+    city           VARCHAR(50),           -- City
+    state          VARCHAR(50),           -- State
+    annual_income  DECIMAL(12,2),         -- Declared annual income
+    credit_score   INT                    -- Bureau score (e.g., 300-900)
+);
+
+-- 2. Loan_Applications — submitted applications
+CREATE TABLE Loan_Applications (
+    application_id   INT PRIMARY KEY,      -- Unique application identifier
+    applicant_id     INT,                  -- FK -> Applicants
+    dealer_id        INT,                  -- FK -> Dealers
+    application_date DATE,                 -- Date of application
+    requested_amount DECIMAL(12,2),        -- Loan amount requested
+    application_status VARCHAR(20),        -- Approved / Rejected / Pending / Withdrawn
+    CONSTRAINT fk_app_applicant FOREIGN KEY (applicant_id) REFERENCES Applicants(applicant_id),
+    CONSTRAINT fk_app_dealer    FOREIGN KEY (dealer_id)    REFERENCES Dealers(dealer_id)
+);
+
+-- 3. Loans — disbursed loans
+CREATE TABLE Loans (
+    loan_id          INT PRIMARY KEY,      -- Unique loan identifier
+    application_id    INT,                 -- FK -> Loan_Applications
+    vehicle_id        INT,                 -- FK -> Vehicles
+    principal_amount  DECIMAL(12,2),       -- Disbursed principal
+    interest_rate     DECIMAL(5,2),        -- Annual interest rate (%)
+    tenure_months     INT,                 -- Loan tenure in months
+    emi_amount        DECIMAL(10,2),       -- Monthly EMI
+    disbursal_date    DATE,                -- Date of disbursal
+    loan_status       VARCHAR(20),         -- Active / Closed / Foreclosed / Defaulted
+    CONSTRAINT fk_loan_app     FOREIGN KEY (application_id) REFERENCES Loan_Applications(application_id),
+    CONSTRAINT fk_loan_vehicle FOREIGN KEY (vehicle_id)    REFERENCES Vehicles(vehicle_id)
+);
+
+-- 4. Vehicles — financed vehicles
+CREATE TABLE Vehicles (
+    vehicle_id   INT PRIMARY KEY,          -- Unique vehicle identifier
+    make_model   VARCHAR(80),              -- e.g., 'Hyundai Creta'
+    manufacture_year INT,                  -- Year of manufacture
+    ex_showroom_price DECIMAL(12,2),       -- Ex-showroom price
+    fuel_type    VARCHAR(20)               -- Petrol / Diesel / EV / CNG / Hybrid
+);
+
+-- 5. EMI_Payments — EMI repayment transactions
+CREATE TABLE EMI_Payments (
+    payment_id     INT PRIMARY KEY,        -- Unique payment identifier
+    loan_id        INT,                    -- FK -> Loans
+    due_date       DATE,                   -- EMI due date
+    payment_date   DATE,                   -- Actual payment date (NULL if unpaid)
+    amount_paid    DECIMAL(10,2),          -- Amount paid
+    payment_status VARCHAR(20),            -- Paid / Missed / Late / Pending
+    CONSTRAINT fk_emi_loan FOREIGN KEY (loan_id) REFERENCES Loans(loan_id)
+);
+
+-- 6. Dealers — originating dealerships
+CREATE TABLE Dealers (
+    dealer_id   INT PRIMARY KEY,           -- Unique dealer identifier
+    dealer_name VARCHAR(120),              -- Dealership name
+    city        VARCHAR(50),               -- City
+    state       VARCHAR(50)                -- State
+);
+```
+
+---
+
+## 4. Categorical Value Domains (likely valid values)
+
+| Column | Likely values |
+|--------|---------------|
+| `Loan_Applications.application_status` | `Approved`, `Rejected`, `Pending`, `Withdrawn` |
+| `Loans.loan_status` | `Active`, `Closed`, `Foreclosed`, `Defaulted` |
+| `Vehicles.fuel_type` | `Petrol`, `Diesel`, `EV`, `CNG`, `Hybrid` |
+| `EMI_Payments.payment_status` | `Paid`, `Missed`, `Late`, `Pending` |
+
+---
+
+## 5. Conventions & Hints for Query Generation
+
+- **Money columns** (`annual_income`, `requested_amount`, `principal_amount`, `emi_amount`,
+  `ex_showroom_price`, `amount_paid`) are `DECIMAL` — use `SUM`, `AVG`, `ROUND`.
+- **Approval rate** = approved applications / total applications.
+- **Overdue / delinquent EMIs** = `payment_status IN ('Missed','Late')`.
+- **Outstanding loans** = `loan_status = 'Active'`.
+- Link an EMI to the borrower via `EMI_Payments -> Loans -> Loan_Applications -> Applicants`.
+- Prefer explicit `JOIN ... ON` and table aliases.
+
+---
+
+## 6. Example Natural-Language → SQL Patterns
+
+**"Total principal disbursed per dealer this year."**
+```sql
+SELECT d.dealer_name, SUM(l.principal_amount) AS total_disbursed
+FROM Loans l
+JOIN Loan_Applications la ON l.application_id = la.application_id
+JOIN Dealers d            ON la.dealer_id     = d.dealer_id
+WHERE l.disbursal_date >= '2024-01-01' AND l.disbursal_date < '2025-01-01'
+GROUP BY d.dealer_name
+ORDER BY total_disbursed DESC;
+```
+
+**"Number of loans by status."**
+```sql
+SELECT loan_status, COUNT(*) AS loan_count
+FROM Loans
+GROUP BY loan_status
+ORDER BY loan_count DESC;
+```
+
+**"Applicants with missed EMIs and their loan amount."**
+```sql
+SELECT a.full_name, l.principal_amount, COUNT(*) AS missed_emis
+FROM EMI_Payments e
+JOIN Loans l              ON e.loan_id = l.loan_id
+JOIN Loan_Applications la ON l.application_id = la.application_id
+JOIN Applicants a         ON la.applicant_id = a.applicant_id
+WHERE e.payment_status = 'Missed'
+GROUP BY a.full_name, l.principal_amount
+ORDER BY missed_emis DESC;
+```

@@ -48,6 +48,19 @@ _CONTEXT_DIR = os.path.join(_UPLOADS_DIR, "context")
 for _d in (_EXCEL_DIR, _CONTEXT_DIR):
     os.makedirs(_d, exist_ok=True)
 
+# ── Product verticals (curated, app-bundled context) ──────────────────────────
+# Each vertical maps to a context file shipped with the app. Picking a vertical
+# loads its full text as the context (generate-only mode). The "db" slot is a
+# placeholder for the future phase where a vertical auto-connects its live MySQL DB.
+_VERTICALS_DIR = os.path.join(_PROJECT_ROOT, "verticals")
+VERTICALS = {
+    "Insurance": {"file": "insurance.txt", "db": None},
+    "Challan":   {"file": "challan.txt",   "db": None},
+    "Fastag":    {"file": "fastag.txt",    "db": None},
+    "Car Loan":  {"file": "car_loan.txt",  "db": None},
+    "Parking":   {"file": "parking.txt",   "db": None},
+}
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Text-to-SQL Agent",
@@ -78,10 +91,12 @@ _STATE_DEFAULTS = {
     "persisted_excel_name": None,
     "persisted_context_name": None,
     "context_full_text": "",
+    "active_vertical": None,
     "confirm_replace_context": False,
     "_auto_load_done": False,
     "_just_loaded_excel": None,
     "_excel_uploader_key": 0,
+    "_ctx_uploader_key": 0,
 }
 for key, default in _STATE_DEFAULTS.items():
     if key not in st.session_state:
@@ -233,6 +248,38 @@ def _index_context_file(file_path: str) -> None:
         st.session_state.context_full_text = ""
 
 
+def _load_vertical(name: str) -> None:
+    """Load a bundled vertical's context file as the active context (generate-only).
+    Verticals use full-text injection — no RAG/embeddings needed."""
+    cfg = VERTICALS[name]
+    path = os.path.join(_VERTICALS_DIR, cfg["file"])
+    try:
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
+            text = f.read()
+    except Exception as e:
+        st.error(f"Could not load '{name}' context: {e}")
+        return
+    # Supersede any uploaded context (file + RAG index) — verticals are self-contained.
+    for old in glob.glob(os.path.join(_CONTEXT_DIR, "*")):
+        try:
+            os.remove(old)
+        except Exception:
+            pass
+    if st.session_state.retriever:
+        st.session_state.retriever.clear()
+    st.session_state.update(
+        retriever=None,
+        rag_status="",
+        context_full_text=text,
+        persisted_context_name=f"{name} (built-in)",
+        active_vertical=name,
+        confirm_replace_context=False,
+        chat_history=[],
+        messages=[],
+    )
+    st.session_state._ctx_uploader_key += 1  # reset uploader widget
+
+
 def _clear_context() -> None:
     """Remove persisted context file and clear RAG index."""
     for old in glob.glob(os.path.join(_CONTEXT_DIR, "*")):
@@ -246,6 +293,7 @@ def _clear_context() -> None:
     st.session_state.rag_status = ""
     st.session_state.persisted_context_name = None
     st.session_state.context_full_text = ""
+    st.session_state.active_vertical = None
     st.session_state.confirm_replace_context = False
 
 
@@ -379,28 +427,46 @@ with st.sidebar:
 
     st.divider()
 
-    # ── Context Document (RAG) ────────────────────────────────────────────────
-    st.header("Context Document")
-    st.caption(
-        "Upload a .txt or .pdf file containing business rules, column descriptions, "
-        "domain terminology, or example questions. Used to improve SQL generation."
-    )
+    # ── Context: product vertical or custom upload ────────────────────────────
+    st.header("Context")
 
     if st.session_state.persisted_context_name:
         st.success(f"Loaded: {st.session_state.persisted_context_name}")
         if st.session_state.rag_status:
             st.caption(st.session_state.rag_status)
-        if st.button("Clear context document"):
+        if st.button("Clear context"):
             _clear_context()
             st.rerun()
+
+    # Product vertical selector — loads a curated, app-bundled context file.
+    st.subheader("Product vertical")
+    st.caption("Pick a product line to load its built-in schema context.")
+    vert_choice = st.selectbox(
+        "Vertical", ["— Select —"] + list(VERTICALS.keys()), key="vertical_select"
+    )
+    if st.button("Load vertical context", type="primary"):
+        if vert_choice in VERTICALS:
+            _load_vertical(vert_choice)
+            st.rerun()
+        else:
+            st.warning("Choose a vertical first.")
+
+    # Custom upload — optional override for users with their own schema doc.
+    st.subheader("Or upload your own")
+    st.caption(
+        "Upload a .txt or .pdf with business rules, column descriptions, or example "
+        "questions. Used to improve SQL generation (indexed for RAG retrieval)."
+    )
 
     uploaded_ctx = st.file_uploader(
         "Upload context (.txt or .pdf)",
         type=["txt", "pdf"],
-        key="ctx_uploader",
+        key=f"ctx_uploader_{st.session_state._ctx_uploader_key}",
     )
 
-    if uploaded_ctx:
+    # Only treat as a new upload when the file differs from what's already loaded —
+    # otherwise the retained widget value re-triggers the replace prompt every rerun.
+    if uploaded_ctx and uploaded_ctx.name != st.session_state.persisted_context_name:
         has_existing = bool(st.session_state.persisted_context_name)
 
         if has_existing and not st.session_state.confirm_replace_context:
@@ -422,8 +488,10 @@ with st.sidebar:
                 saved_ctx_path = _save_uploaded_file(uploaded_ctx, _CONTEXT_DIR)
                 _index_context_file(saved_ctx_path)
             st.session_state.confirm_replace_context = False
+            st.session_state.active_vertical = None  # custom upload supersedes any vertical
             st.success(f"Context indexed: {uploaded_ctx.name}")
             st.caption(st.session_state.rag_status)
+            st.session_state._ctx_uploader_key += 1  # reset uploader so it won't re-fire
             st.rerun()
 
     st.divider()

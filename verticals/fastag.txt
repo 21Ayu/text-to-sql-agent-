@@ -1,0 +1,160 @@
+# FASTag (Toll) Database — Schema Context for SQL Generation
+
+> ⚠️ **STARTER TEMPLATE — REPLACE WITH YOUR REAL SCHEMA.** The tables, columns,
+> and values below are a plausible starting point for a FASTag/toll domain.
+> Edit them to match your actual database before relying on generated SQL.
+>
+> **Purpose of this file:** Authoritative context for translating natural-language
+> questions into SQL for the FASTag vertical.
+
+---
+
+## 1. Database Overview
+
+Operational database for a **FASTag electronic toll-collection** system. It tracks
+FASTag accounts linked to vehicles, toll plazas, toll transactions (debits) at plazas,
+and wallet recharges (credits).
+
+### Table summary
+
+| # | Table | Grain (one row = ) | Key FKs |
+|---|-------|--------------------|---------|
+| 1 | `Fastag_Accounts` | one issued FASTag / wallet | `vehicle_id` |
+| 2 | `Vehicles` | one registered vehicle | — |
+| 3 | `Toll_Plazas` | one toll plaza | — |
+| 4 | `Toll_Transactions` | one toll debit at a plaza | `fastag_id`, `plaza_id` |
+| 5 | `Recharges` | one wallet recharge (credit) | `fastag_id` |
+
+---
+
+## 2. Relationships (how to JOIN)
+
+```
+Vehicles ──< Fastag_Accounts ──< Toll_Transactions >── Toll_Plazas
+                              └──< Recharges
+```
+
+Join keys:
+
+- `Fastag_Accounts.vehicle_id`   → `Vehicles.vehicle_id`
+- `Toll_Transactions.fastag_id`  → `Fastag_Accounts.fastag_id`
+- `Toll_Transactions.plaza_id`   → `Toll_Plazas.plaza_id`
+- `Recharges.fastag_id`          → `Fastag_Accounts.fastag_id`
+
+---
+
+## 3. Table Definitions (DDL)
+
+```sql
+-- 1. Vehicles — registered vehicles
+CREATE TABLE Vehicles (
+    vehicle_id      INT PRIMARY KEY,      -- Unique vehicle identifier
+    registration_no VARCHAR(20),          -- e.g., 'HR26AB1234'
+    vehicle_class   VARCHAR(20),          -- Car / LCV / Truck / Bus (toll class)
+    owner_name      VARCHAR(100),         -- Owner name
+    state           VARCHAR(50)           -- Registration state
+);
+
+-- 2. Fastag_Accounts — FASTag wallets
+CREATE TABLE Fastag_Accounts (
+    fastag_id       INT PRIMARY KEY,      -- Unique FASTag identifier
+    vehicle_id      INT,                  -- FK -> Vehicles
+    tag_serial      VARCHAR(40),          -- Physical tag serial / barcode
+    issue_date      DATE,                 -- Date the tag was issued
+    wallet_balance  DECIMAL(10,2),        -- Current wallet balance
+    account_status  VARCHAR(20),          -- Active / Blacklisted / LowBalance / Closed
+    issuer_bank     VARCHAR(60),          -- Issuing bank
+    CONSTRAINT fk_ft_vehicle FOREIGN KEY (vehicle_id) REFERENCES Vehicles(vehicle_id)
+);
+
+-- 3. Toll_Plazas — toll plaza master
+CREATE TABLE Toll_Plazas (
+    plaza_id    INT PRIMARY KEY,          -- Unique plaza identifier
+    plaza_name  VARCHAR(120),             -- e.g., 'Kherki Daula Toll Plaza'
+    highway     VARCHAR(60),              -- e.g., 'NH-48'
+    state       VARCHAR(50),              -- Plaza state
+    city        VARCHAR(50)               -- Nearest city
+);
+
+-- 4. Toll_Transactions — toll debits
+CREATE TABLE Toll_Transactions (
+    txn_id        INT PRIMARY KEY,        -- Unique transaction identifier
+    fastag_id     INT,                    -- FK -> Fastag_Accounts
+    plaza_id      INT,                    -- FK -> Toll_Plazas
+    txn_datetime  DATETIME,               -- Date & time of crossing
+    amount        DECIMAL(10,2),          -- Toll amount debited
+    txn_status    VARCHAR(20),            -- Success / Failed / Reversed
+    CONSTRAINT fk_tt_fastag FOREIGN KEY (fastag_id) REFERENCES Fastag_Accounts(fastag_id),
+    CONSTRAINT fk_tt_plaza  FOREIGN KEY (plaza_id)  REFERENCES Toll_Plazas(plaza_id)
+);
+
+-- 5. Recharges — wallet credits
+CREATE TABLE Recharges (
+    recharge_id    INT PRIMARY KEY,       -- Unique recharge identifier
+    fastag_id      INT,                   -- FK -> Fastag_Accounts
+    recharge_date  DATE,                  -- Date of recharge
+    amount         DECIMAL(10,2),         -- Recharge amount
+    payment_mode   VARCHAR(20),           -- UPI / Card / NetBanking / Wallet
+    recharge_status VARCHAR(20),          -- Success / Failed / Pending
+    CONSTRAINT fk_rc_fastag FOREIGN KEY (fastag_id) REFERENCES Fastag_Accounts(fastag_id)
+);
+```
+
+---
+
+## 4. Categorical Value Domains (likely valid values)
+
+| Column | Likely values |
+|--------|---------------|
+| `Vehicles.vehicle_class` | `Car`, `LCV`, `Truck`, `Bus` |
+| `Fastag_Accounts.account_status` | `Active`, `Blacklisted`, `LowBalance`, `Closed` |
+| `Toll_Transactions.txn_status` | `Success`, `Failed`, `Reversed` |
+| `Recharges.payment_mode` | `UPI`, `Card`, `NetBanking`, `Wallet` |
+| `Recharges.recharge_status` | `Success`, `Failed`, `Pending` |
+
+---
+
+## 5. Conventions & Hints for Query Generation
+
+- **Money columns** (`wallet_balance`, `amount`) are `DECIMAL` — use `SUM`, `AVG`, `ROUND`.
+- `Toll_Transactions.txn_datetime` is a `DATETIME` (has time); use `DATE(txn_datetime)` for day grouping.
+- **Toll revenue** = `SUM(amount)` over `txn_status = 'Success'`.
+- **Low-balance tags** = `account_status = 'LowBalance'` OR `wallet_balance < threshold`.
+- Link a transaction to its vehicle via `Toll_Transactions -> Fastag_Accounts -> Vehicles`.
+- Prefer explicit `JOIN ... ON` and table aliases.
+
+---
+
+## 6. Example Natural-Language → SQL Patterns
+
+**"Total toll revenue per plaza this month."**
+```sql
+SELECT tp.plaza_name, SUM(tt.amount) AS toll_revenue
+FROM Toll_Transactions tt
+JOIN Toll_Plazas tp ON tt.plaza_id = tp.plaza_id
+WHERE tt.txn_status = 'Success'
+  AND tt.txn_datetime >= '2024-06-01' AND tt.txn_datetime < '2024-07-01'
+GROUP BY tp.plaza_name
+ORDER BY toll_revenue DESC;
+```
+
+**"Top 10 vehicles by number of toll crossings."**
+```sql
+SELECT v.registration_no, COUNT(*) AS crossings
+FROM Toll_Transactions tt
+JOIN Fastag_Accounts f ON tt.fastag_id = f.fastag_id
+JOIN Vehicles v        ON f.vehicle_id = v.vehicle_id
+WHERE tt.txn_status = 'Success'
+GROUP BY v.registration_no
+ORDER BY crossings DESC
+LIMIT 10;
+```
+
+**"Total recharges by payment mode."**
+```sql
+SELECT payment_mode, SUM(amount) AS total_recharged
+FROM Recharges
+WHERE recharge_status = 'Success'
+GROUP BY payment_mode
+ORDER BY total_recharged DESC;
+```
