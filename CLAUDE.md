@@ -63,7 +63,10 @@ executing (there is nothing to run it against).
   `RAGRetriever.read_full_text()` reads the whole txt/pdf.
 - Dialect is fixed to **MySQL** in this mode.
 - `run_agent(executor=None)` → `_route_after_generate` ends the graph after `generate_sql`,
-  skipping execution and retries. Output is the generated SQL only (no table/chart/CSV).
+  skipping execution and retries. Output is the generated SQL only (no table/chart/CSV),
+  shown in a code block (with Streamlit's native copy icon) plus an explicit
+  "Download .sql" button (`_copy_sql_button`). A custom JS clipboard button was avoided
+  because it requires the deprecated `components.html` iframe.
 
 ### Schema Auto-Extraction (no hardcoding)
 At connect/upload time the schema is dynamically extracted and includes:
