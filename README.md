@@ -1,12 +1,12 @@
 # Text-to-SQL AI Agent
 
-A Streamlit web app that lets non-technical users query any Excel dataset using plain English. Upload your data, ask questions, and get instant tables and charts — no SQL knowledge required.
+A Streamlit web app that lets non-technical users query any Excel dataset or MySQL database using plain English. Connect your data, ask questions, and get instant tables and charts — no SQL knowledge required.
 
 ---
 
 ## What It Does
 
-Upload an Excel file and ask questions like:
+Connect an Excel file or a live MySQL database and ask questions like:
 
 > *"Show me total revenue by region for last quarter"*
 > *"Which product category has the highest return rate?"*
@@ -51,7 +51,7 @@ User question
 Table + Chart returned to user
 ```
 
-**Schema is fully automatic.** The agent reads your Excel file and extracts column types, sample values, value ranges, null rates, and cross-sheet relationships — no configuration needed.
+**Schema is fully automatic.** The agent reads your data source and extracts column types, sample values, value ranges, null rates, and cross-sheet relationships — no configuration needed. For MySQL, you can optionally sample real column values (enum/status fields) so the agent filters on exact values.
 
 **Business context via RAG.** Upload a `.txt` or `.pdf` file (e.g., a data dictionary, business rules doc, or list of example questions). The agent retrieves relevant chunks and injects them into every prompt, so it understands domain-specific terminology and column meanings.
 
@@ -66,7 +66,7 @@ Table + Chart returned to user
 | LLM | OpenAI GPT (gpt-4o / gpt-4o-mini) |
 | RAG embeddings | OpenAI text-embedding-3-small |
 | Vector store | ChromaDB |
-| SQL engine | SQLite (in-memory, loaded from Excel) |
+| SQL engine | SQLite (in-memory, from Excel) / MySQL (live, via SQLAlchemy + PyMySQL) |
 | Charts | Plotly Express |
 | Excel parsing | pandas + openpyxl |
 
@@ -80,9 +80,9 @@ Text_to_sql/
 │   ├── main.py              # Streamlit UI — entry point
 │   ├── graph_agent.py       # LangGraph 4-node pipeline
 │   ├── rag_retriever.py     # ChromaDB RAG indexer
-│   ├── schema_extractor.py  # Auto-extracts schema from Excel
+│   ├── schema_extractor.py  # Auto-extracts schema from Excel or MySQL
 │   ├── data_loader.py       # Loads Excel into in-memory SQLite
-│   ├── executor.py          # Runs SQL, returns DataFrame
+│   ├── executor.py          # Runs SQL on SQLite or MySQL, returns DataFrame
 │   ├── chart_renderer.py    # Plotly chart builder
 │   └── errors.py            # Maps exceptions to friendly messages
 ├── requirements.txt
@@ -122,18 +122,24 @@ Opens at `http://localhost:8501`
 
 ## Usage
 
-1. **Upload an Excel file** in the sidebar — multi-sheet files are supported
+1. **Connect a data source** in the sidebar — choose a tab:
+   - **Excel** — upload an `.xlsx` file (multi-sheet files are supported)
+   - **MySQL** — enter host, port, user, password, and database, then click **Connect**. Once connected, optionally use **Column Value Sampling** to inject real enum/status values into the prompt for more accurate filtering.
 2. *(Optional)* **Upload a context document** (`.txt` or `.pdf`) with business rules or a data dictionary
 3. **Ask a question** in the chat box
 4. Get back a table, chart, or both — with the generated SQL visible in an expander
 5. **Download results** as CSV with one click
 
+> Excel and MySQL are mutually exclusive — connecting one replaces the other as the active source. MySQL connections are not persisted across restarts (credentials are never written to disk); reconnect each session.
+
 ---
 
 ## Features
 
-- **Zero configuration** — schema auto-extracted from any Excel file
+- **Two data sources** — query an uploaded Excel file or a live MySQL database
+- **Zero configuration** — schema auto-extracted from any Excel file or MySQL database
 - **Multi-sheet support** — queries can join data across sheets
+- **MySQL value sampling** — optionally inject real enum/status values into the prompt for accurate filtering
 - **Chart generation** — bar, line, pie, scatter, area charts on request
 - **Auto-retry** — if SQL fails, the agent feeds the error back to the LLM and tries again (up to 2 retries)
 - **Off-topic guard** — irrelevant questions are politely declined
@@ -148,6 +154,13 @@ Opens at `http://localhost:8501`
 | Variable | Description |
 |---|---|
 | `OPENAI_API_KEY` | Required — used for SQL generation and RAG embeddings |
+| `MYSQL_HOST` | Optional — pre-fills the MySQL connection form (default `localhost`) |
+| `MYSQL_PORT` | Optional — pre-fills the MySQL port (default `3306`) |
+| `MYSQL_USER` | Optional — pre-fills the MySQL user (default `root`) |
+| `MYSQL_PASSWORD` | Optional — pre-fills the MySQL password |
+| `MYSQL_DATABASE` | Optional — pre-fills the MySQL database name |
+
+> The MySQL variables only pre-fill the sidebar form for convenience — you can connect to any database by typing the values in the UI. They are not required to run the app.
 
 For Streamlit Cloud deployment, add this in **App Settings → Secrets**:
 

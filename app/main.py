@@ -1,6 +1,7 @@
 """
 Streamlit UI for the Text-to-SQL AI Agent.
-Excel-only mode — upload an .xlsx file, ask questions in plain English.
+Connect a data source — upload an .xlsx file or connect a live MySQL database —
+then ask questions in plain English.
 Context is provided entirely by the user via an uploaded document (txt/pdf).
 All uploaded files are persisted to disk and reloaded automatically on restart.
 """
@@ -22,6 +23,12 @@ from app.graph_agent import run_agent
 from app.chart_renderer import render_chart
 from app.rag_retriever import RAGRetriever
 from app.errors import classify_error
+from app.schema_extractor import (
+    extract_mysql_schema,
+    extract_value_reference,
+    build_mysql_engine,
+)
+from sqlalchemy import inspect as sa_inspect
 
 load_dotenv()
 
@@ -62,6 +69,11 @@ _STATE_DEFAULTS = {
     "chat_history": [],
     "messages": [],
     "openai_model": "gpt-4o-mini",
+    # MySQL connection state
+    "mysql_engine": None,
+    "mysql_tables": [],
+    "value_reference": "",
+    "persisted_mysql_db": None,
     # Persistence state
     "persisted_excel_name": None,
     "persisted_context_name": None,
@@ -134,6 +146,50 @@ def _load_excel_file(file_path: str) -> bool:
         return False
 
 
+def _connect_mysql(host: str, port: str, user: str, password: str, database: str) -> bool:
+    """Connect to MySQL, extract schema, and wire up the executor. Returns True on success."""
+    try:
+        engine = build_mysql_engine(host, int(port), user, password, database)
+        schema_str = extract_mysql_schema(engine)  # connects + inspects (raises if unreachable)
+        tables = sa_inspect(engine).get_table_names()
+        st.session_state.update(
+            source_type="mysql",
+            mysql_engine=engine,
+            schema=schema_str,
+            executor=QueryExecutor("mysql", mysql_engine=engine),
+            mysql_tables=tables,
+            value_reference="",
+            persisted_mysql_db=database,
+            chat_history=[],
+            messages=[],
+        )
+        return True
+    except Exception as e:
+        st.error(classify_error(str(e), context="db_connect"))
+        return False
+
+
+def _disconnect_mysql() -> None:
+    """Tear down the MySQL connection and clear related state."""
+    engine = st.session_state.mysql_engine
+    if engine is not None:
+        try:
+            engine.dispose()
+        except Exception:
+            pass
+    st.session_state.update(
+        source_type=None,
+        mysql_engine=None,
+        schema=None,
+        executor=None,
+        mysql_tables=[],
+        value_reference="",
+        persisted_mysql_db=None,
+        chat_history=[],
+        messages=[],
+    )
+
+
 def _index_context_file(file_path: str) -> None:
     """Index a context file into RAG and update session state."""
     r = _build_retriever()
@@ -191,45 +247,95 @@ with st.sidebar:
     # ── Data Source ───────────────────────────────────────────────────────────
     st.header("Data Source")
 
-    if st.session_state.persisted_excel_name and st.session_state.source_type == "excel":
-        st.success(f"Loaded: {st.session_state.persisted_excel_name}")
-        with st.expander("Schema"):
-            st.code(st.session_state.schema or "")
-        if st.button("Clear Excel file"):
-            for old in glob.glob(os.path.join(_EXCEL_DIR, "*")):
-                try:
-                    os.remove(old)
-                except Exception:
-                    pass
-            st.session_state.update(
-                source_type=None, sqlite_conn=None, schema=None,
-                executor=None, persisted_excel_name=None,
-                chat_history=[], messages=[],
-            )
-            st.session_state._excel_uploader_key += 1
-            st.rerun()
+    excel_tab, mysql_tab = st.tabs(["Excel", "MySQL"])
 
-    uploaded = st.file_uploader(
-        "Upload Excel (.xlsx)",
-        type=["xlsx"],
-        key=f"excel_uploader_{st.session_state._excel_uploader_key}",
-    )
-    if uploaded and uploaded.name != st.session_state.persisted_excel_name:
-        size_mb = uploaded.size / (1024 * 1024)
-        if size_mb > 50:
-            st.error(
-                f"**Large file ({size_mb:.1f} MB)** — this may exhaust available memory on "
-                "Streamlit Cloud and cause a crash. Consider trimming the file to under 50 MB."
-            )
-        elif size_mb > 20:
-            st.warning(
-                f"**Moderate file size ({size_mb:.1f} MB)** — loading may take 15–30 seconds."
-            )
-        saved_path = _save_uploaded_file(uploaded, _EXCEL_DIR)
-        if _load_excel_file(saved_path):
-            st.session_state._just_loaded_excel = uploaded.name
-            st.session_state._excel_uploader_key += 1
-            st.rerun()
+    # ── Excel ─────────────────────────────────────────────────────────────────
+    with excel_tab:
+        if st.session_state.persisted_excel_name and st.session_state.source_type == "excel":
+            st.success(f"Loaded: {st.session_state.persisted_excel_name}")
+            with st.expander("Schema"):
+                st.code(st.session_state.schema or "")
+            if st.button("Clear Excel file"):
+                for old in glob.glob(os.path.join(_EXCEL_DIR, "*")):
+                    try:
+                        os.remove(old)
+                    except Exception:
+                        pass
+                st.session_state.update(
+                    source_type=None, sqlite_conn=None, schema=None,
+                    executor=None, persisted_excel_name=None,
+                    chat_history=[], messages=[],
+                )
+                st.session_state._excel_uploader_key += 1
+                st.rerun()
+
+        uploaded = st.file_uploader(
+            "Upload Excel (.xlsx)",
+            type=["xlsx"],
+            key=f"excel_uploader_{st.session_state._excel_uploader_key}",
+        )
+        if uploaded and uploaded.name != st.session_state.persisted_excel_name:
+            size_mb = uploaded.size / (1024 * 1024)
+            if size_mb > 50:
+                st.error(
+                    f"**Large file ({size_mb:.1f} MB)** — this may exhaust available memory on "
+                    "Streamlit Cloud and cause a crash. Consider trimming the file to under 50 MB."
+                )
+            elif size_mb > 20:
+                st.warning(
+                    f"**Moderate file size ({size_mb:.1f} MB)** — loading may take 15–30 seconds."
+                )
+            saved_path = _save_uploaded_file(uploaded, _EXCEL_DIR)
+            if _load_excel_file(saved_path):
+                st.session_state._just_loaded_excel = uploaded.name
+                st.session_state._excel_uploader_key += 1
+                st.rerun()
+
+    # ── MySQL ─────────────────────────────────────────────────────────────────
+    with mysql_tab:
+        if st.session_state.source_type == "mysql" and st.session_state.mysql_engine is not None:
+            st.success(f"Connected: {st.session_state.persisted_mysql_db}")
+            with st.expander("Schema"):
+                st.code(st.session_state.schema or "")
+
+            with st.expander("Column Value Sampling"):
+                st.caption(
+                    "Select tables to sample real enum/status values from. "
+                    "These exact values are injected into the prompt to improve filtering."
+                )
+                sel_tables = st.multiselect(
+                    "Tables", st.session_state.mysql_tables, key="mysql_sample_tables"
+                )
+                if st.button("Sample values"):
+                    with st.spinner("Sampling column values..."):
+                        st.session_state.value_reference = extract_value_reference(
+                            st.session_state.mysql_engine, sel_tables
+                        )
+                    if st.session_state.value_reference:
+                        st.success("Values sampled and added to prompt context.")
+                    else:
+                        st.info("No low-cardinality text columns found in the selected tables.")
+                if st.session_state.value_reference:
+                    st.code(st.session_state.value_reference)
+
+            if st.button("Disconnect"):
+                _disconnect_mysql()
+                st.rerun()
+        else:
+            with st.form("mysql_connect_form"):
+                host = st.text_input("Host", value=os.environ.get("MYSQL_HOST", "localhost"))
+                port = st.text_input("Port", value=os.environ.get("MYSQL_PORT", "3306"))
+                user = st.text_input("User", value=os.environ.get("MYSQL_USER", "root"))
+                password = st.text_input(
+                    "Password", value=os.environ.get("MYSQL_PASSWORD", ""), type="password"
+                )
+                database = st.text_input("Database", value=os.environ.get("MYSQL_DATABASE", ""))
+                connect = st.form_submit_button("Connect", type="primary")
+            if connect:
+                with st.spinner("Connecting to MySQL..."):
+                    ok = _connect_mysql(host, port, user, password, database)
+                if ok:
+                    st.rerun()
 
     st.divider()
 
@@ -335,10 +441,11 @@ if question:
                 user_question=question,
                 schema=st.session_state.schema,
                 executor=st.session_state.executor,
-                dialect="SQLite",
+                dialect="MySQL" if st.session_state.source_type == "mysql" else "SQLite",
                 chat_history=st.session_state.chat_history,
                 openai_model=st.session_state.openai_model,
                 retriever=st.session_state.retriever,
+                value_reference=st.session_state.value_reference,
             )
 
         if not result.get("is_relevant", True):
