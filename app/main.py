@@ -148,6 +148,17 @@ def _load_excel_file(file_path: str) -> bool:
 
 def _connect_mysql(host: str, port: str, user: str, password: str, database: str) -> bool:
     """Connect to MySQL, extract schema, and wire up the executor. Returns True on success."""
+    # Validate inputs before attempting a connection so users get clear guidance.
+    if not host.strip():
+        st.error("Host is required — enter the MySQL server address.")
+        return False
+    if not database.strip():
+        st.error("Database is required — enter the database name.")
+        return False
+    port = port.strip()
+    if not (port.isdigit() and 1 <= int(port) <= 65535):
+        st.error("Port must be a number between 1 and 65535.")
+        return False
     try:
         engine = build_mysql_engine(host, int(port), user, password, database)
         schema_str = extract_mysql_schema(engine)  # connects + inspects (raises if unreachable)
