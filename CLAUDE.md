@@ -1,7 +1,7 @@
 # Text-to-SQL AI Agent — Project Context
 
 ## What This Project Is
-A Streamlit-based AI agent that converts natural language business questions into SQL queries, executes them, and returns results as tables or interactive charts. Built for non-technical users to query any MySQL database or uploaded Excel file without writing SQL. The app is a **blank model** — it derives all schema knowledge dynamically from the data source and from an optional user-uploaded context document (txt or pdf). No schema is hardcoded anywhere.
+A Streamlit-based AI agent that converts natural language business questions into SQL queries, executes them, and returns results as tables or interactive charts. Built for non-technical users to query any MySQL database or uploaded Excel file without writing SQL. The app is a **blank model** by default — it derives schema knowledge dynamically from the data source and from an optional user-uploaded context document (txt or pdf). It can also run in a **curated product-vertical mode** where a pre-built context file (per product line) is loaded so the model generates SQL without any data connection. No schema is hardcoded in application code; curated schema lives in editable `verticals/*.txt` files.
 
 ## How to Run
 ```bash
@@ -26,6 +26,12 @@ Text_to_sql/
 ├── uploads/
 │   ├── excel/               # Persisted uploaded Excel files (auto-reloaded on restart)
 │   └── context/             # Persisted context documents (txt/pdf, auto-reloaded)
+├── verticals/               # Curated, app-bundled context per product line (committed)
+│   ├── insurance.txt        # Seeded from a real schema
+│   ├── challan.txt          # Starter template — fill with real schema
+│   ├── fastag.txt           # Starter template — fill with real schema
+│   ├── car_loan.txt         # Starter template — fill with real schema
+│   └── parking.txt          # Starter template — fill with real schema
 ├── chroma_db/               # ChromaDB vector store (auto-created on first context upload)
 ├── requirements.txt
 ├── .env                     # API keys and DB credentials (never commit this)
@@ -67,6 +73,21 @@ executing (there is nothing to run it against).
   shown in a code block (with Streamlit's native copy icon) plus an explicit
   "Download .sql" button (`_copy_sql_button`). A custom JS clipboard button was avoided
   because it requires the deprecated `components.html` iframe.
+
+### Product Verticals (curated, app-bundled context)
+The sidebar **Context** section lets a user pick a **product vertical** (Insurance, Challan,
+Fastag, Car Loan, Parking) instead of uploading their own doc. This trades the "blank model"
+generality for curated, consistent per-vertical quality — a deliberate product choice.
+- Files live in `verticals/<name>.txt` and are **committed** to the repo. `insurance.txt`
+  is seeded from a real schema; the other four are starter templates to be filled in.
+- `VERTICALS` config in `app/main.py` maps each vertical → its context file, with a `db`
+  slot reserved for the future **live-DB-per-vertical** phase (currently `None`).
+- Selecting a vertical (`_load_vertical`) injects the **full file text** as the context
+  (no RAG/embeddings) and runs **generate-only** mode → produces MySQL SQL, not executed.
+- Verticals and custom upload are mutually exclusive: loading a vertical supersedes any
+  uploaded context (clears `uploads/context/` + RAG index); uploading clears `active_vertical`.
+- **Phase 1 = generate-only**; once confidence is high, populate each vertical's `db` slot
+  to auto-connect its MySQL database and execute queries for real.
 
 ### Schema Auto-Extraction (no hardcoding)
 At connect/upload time the schema is dynamically extracted and includes:
@@ -180,10 +201,13 @@ Install: `pip install -r requirements.txt`
 8. Phase 8: Query examples — `query_examples.txt` indexed by RAG alongside schema
 9. **Phase 9: Blank-model refactor** — removed all hardcoded schema files (`schema_description.txt`, `query_examples.txt`, `schema_context.yaml`). Schema is now fully auto-extracted from the data source with rich metadata. RAG now indexes user-uploaded documents (txt/pdf) only. MySQL enum sampling is user-driven via sidebar multiselect. All uploads persisted to disk and auto-reloaded on restart. Context replace requires user confirmation.
 10. **Phase 10: MySQL exposed in UI** — the Data Source sidebar is now tabbed (Excel / MySQL). The MySQL tab provides a connection form (pre-filled from `.env`), Connect/Disconnect, schema viewer, and Column Value Sampling. `run_agent` is called with `dialect="MySQL"` and the sampled `value_reference` when MySQL is active. Backend (executor, schema_extractor, build_mysql_engine) already supported MySQL — this wired it into `app/main.py`. Also added input validation (host/database required, port 1–65535) before connecting.
-11. **Phase 11: Context-only SQL generation** — the app can now generate SQL from an uploaded context document alone, with no Excel/MySQL connection. `graph_agent` accepts `executor=None` and routes straight to END after `generate_sql` (no execution/retries). The full context-doc text is injected as the schema (`RAGRetriever.read_full_text()`), dialect fixed to MySQL, output is SQL only. UI gate in `main.py` opens when a context doc is loaded even without a data source.
+11. **Phase 11: Context-only SQL generation** — the app can now generate SQL from an uploaded context document alone, with no Excel/MySQL connection. `graph_agent` accepts `executor=None` and routes straight to END after `generate_sql` (no execution/retries). The full context-doc text is injected as the schema (`RAGRetriever.read_full_text()`), dialect fixed to MySQL, output is SQL only (code block with copy icon + "Download .sql" button). UI gate in `main.py` opens when a context doc is loaded even without a data source. Also pinned `streamlit>=1.56,<2` for reproducible deploys and fixed the context uploader self-replace re-prompt (name guard + uploader key reset).
+12. **Phase 12: Product verticals** — added a curated, app-bundled context file per product line (`verticals/insurance.txt` seeded from a real schema; `challan/fastag/car_loan/parking` as starter templates). Sidebar "Context" section gets a vertical selector + "Load vertical context" that injects the full file as context and generates SQL (generate-only, no RAG). Custom upload kept as an override. `VERTICALS` config has a `db` slot reserved for the future live-DB phase.
 
 ## Possible Next Features
-- Export query results to CSV/Excel download button
+- Fill the 4 vertical templates (challan/fastag/car_loan/parking) with real schemas
+- Live-DB-per-vertical: populate `VERTICALS[...]["db"]` to auto-connect + execute
+- Persist the selected vertical across restarts
 - Query history panel showing past questions and SQL
 - Admin dashboard with preset/pinned questions
 - Support for PostgreSQL as a third data source
