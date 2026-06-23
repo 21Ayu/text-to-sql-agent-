@@ -238,8 +238,10 @@ Question: {state['question']}
 
 def _make_execute_sql():
     def execute_sql(state: AgentState) -> dict:
-        # Don't attempt execution if generate_sql already failed
-        if not state.get("sql"):
+        # Don't attempt execution if generate_sql already failed or blocked the query.
+        # (A blocked query still carries its SQL text, so guard on error too — otherwise
+        # a forbidden statement could execute before its "blocked" message surfaces.)
+        if not state.get("sql") or state.get("error"):
             return {"dataframe": None}
         try:
             df = state["executor"].run(state["sql"])
