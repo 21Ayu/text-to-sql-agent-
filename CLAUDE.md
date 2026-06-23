@@ -80,8 +80,9 @@ All errors pass through `app/errors.py` → `classify_error(raw, context)` which
 `generate_sql` node checks generated SQL for forbidden keywords (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `CREATE`, `ALTER`, `TRUNCATE`, `REPLACE`, `GRANT`, `REVOKE`) and blocks before execution.
 
 ### Data Sources
-- **Excel**: uploaded via sidebar → saved to `uploads/excel/` → loaded into in-memory SQLite → same SQL execution path as MySQL
-- **MySQL**: connected via SQLAlchemy + PyMySQL
+The sidebar "Data Source" section has two tabs — **Excel** and **MySQL** — that are mutually exclusive (connecting one replaces the other as the active source).
+- **Excel**: uploaded via sidebar → saved to `uploads/excel/` → loaded into in-memory SQLite → same SQL execution path as MySQL. Persisted to disk and auto-reloaded on restart.
+- **MySQL**: connected via SQLAlchemy + PyMySQL. The MySQL tab shows a connection form (host/port/user/password/database, pre-filled from `.env`), a Connect button, a schema viewer, the Column Value Sampling expander, and a Disconnect button. Connections are **not** persisted across restarts (credentials are never written to disk) — reconnect each session. The `dialect` passed to the agent is `"MySQL"` when MySQL is active, `"SQLite"` for Excel.
 
 ## LLM Providers Supported
 Configured in sidebar at runtime — no code change needed:
@@ -160,6 +161,7 @@ Install: `pip install -r requirements.txt`
 7. Phase 7: Error handling — `app/errors.py` central classifier, friendly single-line messages
 8. Phase 8: Query examples — `query_examples.txt` indexed by RAG alongside schema
 9. **Phase 9: Blank-model refactor** — removed all hardcoded schema files (`schema_description.txt`, `query_examples.txt`, `schema_context.yaml`). Schema is now fully auto-extracted from the data source with rich metadata. RAG now indexes user-uploaded documents (txt/pdf) only. MySQL enum sampling is user-driven via sidebar multiselect. All uploads persisted to disk and auto-reloaded on restart. Context replace requires user confirmation.
+10. **Phase 10: MySQL exposed in UI** — the Data Source sidebar is now tabbed (Excel / MySQL). The MySQL tab provides a connection form (pre-filled from `.env`), Connect/Disconnect, schema viewer, and Column Value Sampling. `run_agent` is called with `dialect="MySQL"` and the sampled `value_reference` when MySQL is active. Backend (executor, schema_extractor, build_mysql_engine) already supported MySQL — this wired it into `app/main.py`.
 
 ## Possible Next Features
 - Export query results to CSV/Excel download button
