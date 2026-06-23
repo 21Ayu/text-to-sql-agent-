@@ -85,6 +85,7 @@ Text_to_sql/
 │   ├── executor.py          # Runs SQL on SQLite or MySQL, returns DataFrame
 │   ├── chart_renderer.py    # Plotly chart builder
 │   └── errors.py            # Maps exceptions to friendly messages
+├── verticals/               # Curated context per product line (insurance, challan, fastag, car_loan, parking)
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -125,12 +126,18 @@ Opens at `http://localhost:8501`
 1. **Connect a data source** in the sidebar — choose a tab:
    - **Excel** — upload an `.xlsx` file (multi-sheet files are supported)
    - **MySQL** — enter host, port, user, password, and database, then click **Connect**. Once connected, optionally use **Column Value Sampling** to inject real enum/status values into the prompt for more accurate filtering.
-2. *(Optional)* **Upload a context document** (`.txt` or `.pdf`) with business rules or a data dictionary
+2. **Add context** in the sidebar — either:
+   - **Pick a product vertical** (Insurance / Challan / Fastag / Car Loan / Parking) and click **Load vertical context** to use its built-in schema, or
+   - *(Optional)* **Upload your own context document** (`.txt` or `.pdf`) with business rules or a data dictionary
 3. **Ask a question** in the chat box
 4. Get back a table, chart, or both — with the generated SQL visible in an expander
 5. **Download results** as CSV with one click
 
 > Excel and MySQL are mutually exclusive — connecting one replaces the other as the active source. MySQL connections are not persisted across restarts (credentials are never written to disk); reconnect each session.
+
+### Product verticals
+
+The app ships with curated schema context per product line in `verticals/`. Pick a vertical in the sidebar and the model generates SQL for that domain with **no data connection required** (generate-only — SQL is shown, not executed). `insurance.txt` is a complete example; the other four are starter templates — edit the matching `verticals/*.txt` file with your real schema (no code change needed).
 
 ### Context-only mode (no data source)
 
@@ -141,7 +148,8 @@ You don't have to connect a database at all. If you upload **only a context docu
 ## Features
 
 - **Two data sources** — query an uploaded Excel file or a live MySQL database
-- **Context-only SQL generation** — with no data source connected, generate MySQL queries from an uploaded context document alone (SQL is shown, not executed)
+- **Product verticals** — pick a curated product line (Insurance, Challan, Fastag, Car Loan, Parking) to generate SQL with no data connection
+- **Context-only SQL generation** — with no data source connected, generate MySQL queries from a context document (or vertical) alone (SQL is shown, not executed)
 - **Zero configuration** — schema auto-extracted from any Excel file or MySQL database
 - **Multi-sheet support** — queries can join data across sheets
 - **MySQL value sampling** — optionally inject real enum/status values into the prompt for accurate filtering
