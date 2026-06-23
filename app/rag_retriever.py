@@ -65,6 +65,13 @@ class RAGRetriever:
             chunks.extend(parts)
         return chunks
 
+    def read_full_text(self, file_path: str) -> str:
+        """Return the entire document text (txt or pdf), joined by paragraph breaks.
+        Used for context-only mode where the full doc is injected as the schema."""
+        ext = os.path.splitext(file_path)[1].lower()
+        chunks = self._parse_pdf(file_path) if ext == ".pdf" else self._parse_text(file_path)
+        return "\n\n".join(chunks)
+
     # ── Indexing ─────────────────────────────────────────────────────────────
 
     def index_file(self, file_path: str, source_name: str = "context") -> str:

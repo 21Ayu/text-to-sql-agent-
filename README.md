@@ -132,11 +132,16 @@ Opens at `http://localhost:8501`
 
 > Excel and MySQL are mutually exclusive — connecting one replaces the other as the active source. MySQL connections are not persisted across restarts (credentials are never written to disk); reconnect each session.
 
+### Context-only mode (no data source)
+
+You don't have to connect a database at all. If you upload **only a context document** (`.txt` or `.pdf`) describing your tables/columns, the agent will generate **MySQL** queries from that document and display the SQL — without executing it (there's no database to run against). This is useful for drafting queries against a schema you don't have loaded locally. Connect Excel or MySQL whenever you want those queries to actually run and return results.
+
 ---
 
 ## Features
 
 - **Two data sources** — query an uploaded Excel file or a live MySQL database
+- **Context-only SQL generation** — with no data source connected, generate MySQL queries from an uploaded context document alone (SQL is shown, not executed)
 - **Zero configuration** — schema auto-extracted from any Excel file or MySQL database
 - **Multi-sheet support** — queries can join data across sheets
 - **MySQL value sampling** — optionally inject real enum/status values into the prompt for accurate filtering
