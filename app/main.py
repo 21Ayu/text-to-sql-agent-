@@ -77,6 +77,7 @@ _STATE_DEFAULTS = {
     # Persistence state
     "persisted_excel_name": None,
     "persisted_context_name": None,
+    "context_full_text": "",
     "confirm_replace_context": False,
     "_auto_load_done": False,
     "_just_loaded_excel": None,
@@ -208,6 +209,11 @@ def _index_context_file(file_path: str) -> None:
     st.session_state.retriever = r
     st.session_state.rag_status = status
     st.session_state.persisted_context_name = os.path.basename(file_path)
+    # Keep the full document text for context-only SQL generation.
+    try:
+        st.session_state.context_full_text = r.read_full_text(file_path)
+    except Exception:
+        st.session_state.context_full_text = ""
 
 
 def _clear_context() -> None:
@@ -222,6 +228,7 @@ def _clear_context() -> None:
     st.session_state.retriever = None
     st.session_state.rag_status = ""
     st.session_state.persisted_context_name = None
+    st.session_state.context_full_text = ""
     st.session_state.confirm_replace_context = False
 
 
@@ -243,6 +250,11 @@ if not st.session_state._auto_load_done:
             st.session_state.retriever = r
             st.session_state.rag_status = status
             st.session_state.persisted_context_name = os.path.basename(ctx_files[-1])
+            # Recover full document text for context-only SQL generation.
+            try:
+                st.session_state.context_full_text = r.read_full_text(ctx_files[-1])
+            except Exception:
+                st.session_state.context_full_text = ""
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -405,7 +417,14 @@ with st.sidebar:
 
 
 # ── Main chat area ────────────────────────────────────────────────────────────
-if st.session_state.executor is None:
+# Context-only mode: no data source, but a context document is loaded — the agent
+# generates SQL from the document alone and shows it without executing.
+_generate_only = (
+    st.session_state.executor is None
+    and bool(st.session_state.context_full_text)
+)
+
+if st.session_state.executor is None and not _generate_only:
     st.info("Configure a data source in the sidebar to get started.")
     if not st.session_state.persisted_context_name:
         st.info(
@@ -422,13 +441,23 @@ if st.session_state._just_loaded_excel:
     )
     st.session_state._just_loaded_excel = None
 
+if _generate_only:
+    st.info(
+        "**SQL generation only** — no data source connected. The agent will write "
+        "MySQL queries from your context document, but they won't be executed. "
+        "Connect Excel or MySQL in the sidebar to run queries and see results."
+    )
+
 # Render existing messages
 for _msg_idx, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("sql"):
-            with st.expander("Generated SQL"):
+            if msg.get("generate_only"):
                 st.code(msg["sql"], language="sql")
+            else:
+                with st.expander("Generated SQL"):
+                    st.code(msg["sql"], language="sql")
         if msg.get("fig") is not None:
             st.plotly_chart(msg["fig"], use_container_width=True)
         if msg.get("df") is not None:
@@ -450,9 +479,9 @@ if question:
         with st.spinner("Thinking..."):
             result = run_agent(
                 user_question=question,
-                schema=st.session_state.schema,
-                executor=st.session_state.executor,
-                dialect="MySQL" if st.session_state.source_type == "mysql" else "SQLite",
+                schema=st.session_state.context_full_text if _generate_only else st.session_state.schema,
+                executor=None if _generate_only else st.session_state.executor,
+                dialect="MySQL" if (_generate_only or st.session_state.source_type == "mysql") else "SQLite",
                 chat_history=st.session_state.chat_history,
                 openai_model=st.session_state.openai_model,
                 retriever=st.session_state.retriever,
@@ -461,7 +490,7 @@ if question:
 
         if not result.get("is_relevant", True):
             msg = (
-                "I can only answer questions about the connected data — "
+                "I can only answer questions about your data — "
                 "try asking about your tables, records, or metrics."
             )
             st.warning(msg)
@@ -474,6 +503,24 @@ if question:
                 with st.expander("Generated SQL (failed)"):
                     st.code(result["sql"], language="sql")
             st.session_state.messages.append({"role": "assistant", "content": f"Error: {friendly}"})
+
+        elif _generate_only:
+            # No data source — show the generated SQL only.
+            st.code(result["sql"], language="sql")
+            content = f"**{result['title']}** — generated SQL (not executed; no data source connected)."
+            st.markdown(content)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": content,
+                "sql": result["sql"],
+                "generate_only": True,
+                "title": result["title"],
+            })
+            st.session_state.chat_history.append({"role": "user", "content": question})
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": f"SQL: {result['sql']}",
+            })
 
         else:
             df = result["dataframe"]

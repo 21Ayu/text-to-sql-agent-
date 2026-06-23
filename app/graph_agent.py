@@ -238,8 +238,10 @@ Question: {state['question']}
 
 def _make_execute_sql():
     def execute_sql(state: AgentState) -> dict:
-        # Don't attempt execution if generate_sql already failed
-        if not state.get("sql"):
+        # Don't attempt execution if generate_sql already failed or blocked the query.
+        # (A blocked query still carries its SQL text, so guard on error too — otherwise
+        # a forbidden statement could execute before its "blocked" message surfaces.)
+        if not state.get("sql") or state.get("error"):
             return {"dataframe": None}
         try:
             df = state["executor"].run(state["sql"])
@@ -261,9 +263,19 @@ def _should_retry(state: AgentState) -> str:
     return END
 
 
+def _route_after_generate(state: AgentState) -> str:
+    # Context-only mode: no data source connected — return the generated SQL
+    # without executing it (nothing to run against, so skip execute + retries).
+    if state.get("executor") is None:
+        return END
+    return "execute_sql"
+
+
 # ── Graph builder ─────────────────────────────────────────────────────────────
 
-def build_graph(llm, executor: QueryExecutor):
+def build_graph(llm, executor: Optional[QueryExecutor] = None):
+    # executor flows through state (read by execute_sql / _route_after_generate);
+    # the parameter is accepted for clarity and may be None (context-only mode).
     graph = StateGraph(AgentState)
 
     graph.add_node("check_relevance", _make_check_relevance(llm))
@@ -278,7 +290,11 @@ def build_graph(llm, executor: QueryExecutor):
         {"retrieve_context": "retrieve_context", END: END},
     )
     graph.add_edge("retrieve_context", "generate_sql")
-    graph.add_edge("generate_sql", "execute_sql")
+    graph.add_conditional_edges(
+        "generate_sql",
+        _route_after_generate,
+        {"execute_sql": "execute_sql", END: END},
+    )
     graph.add_conditional_edges(
         "execute_sql",
         _should_retry,
@@ -293,7 +309,7 @@ def build_graph(llm, executor: QueryExecutor):
 def run_agent(
     user_question: str,
     schema: str,
-    executor: QueryExecutor,
+    executor: Optional[QueryExecutor] = None,
     dialect: str = "SQLite",
     chat_history: list = None,
     openai_model: str = "gpt-4o",

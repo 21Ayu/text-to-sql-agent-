@@ -44,11 +44,26 @@ User question
     ↓                 Returns relevant chunks from the uploaded txt/pdf
 [generate_sql]      — 1 LLM call with full auto-extracted schema + RAG context + DB values
     ↓                 Returns {sql, needs_chart, chart_type, x_axis, y_axis, title}
-[conditional edge]
+[conditional edge: _route_after_generate]
+    executor is None (context-only) → END  (return SQL without executing)
+    executor present                → execute_sql
+[execute_sql]
+[conditional edge: _should_retry]
     success → END
     error + retries < 2 → back to generate_sql with error context
     error + no retries → END with friendly error message
 ```
+
+### Context-Only Mode (generate SQL without a data source)
+If **no data source** is connected but a **context document is uploaded**, the app runs in
+*generate-only* mode: it writes SQL from the context document alone and displays it without
+executing (there is nothing to run it against).
+- Triggered in `app/main.py` by `_generate_only = executor is None and bool(context_full_text)`.
+- The full context document text (not just RAG top-k chunks) is passed as the `schema` —
+  `RAGRetriever.read_full_text()` reads the whole txt/pdf.
+- Dialect is fixed to **MySQL** in this mode.
+- `run_agent(executor=None)` → `_route_after_generate` ends the graph after `generate_sql`,
+  skipping execution and retries. Output is the generated SQL only (no table/chart/CSV).
 
 ### Schema Auto-Extraction (no hardcoding)
 At connect/upload time the schema is dynamically extracted and includes:
@@ -161,7 +176,8 @@ Install: `pip install -r requirements.txt`
 7. Phase 7: Error handling — `app/errors.py` central classifier, friendly single-line messages
 8. Phase 8: Query examples — `query_examples.txt` indexed by RAG alongside schema
 9. **Phase 9: Blank-model refactor** — removed all hardcoded schema files (`schema_description.txt`, `query_examples.txt`, `schema_context.yaml`). Schema is now fully auto-extracted from the data source with rich metadata. RAG now indexes user-uploaded documents (txt/pdf) only. MySQL enum sampling is user-driven via sidebar multiselect. All uploads persisted to disk and auto-reloaded on restart. Context replace requires user confirmation.
-10. **Phase 10: MySQL exposed in UI** — the Data Source sidebar is now tabbed (Excel / MySQL). The MySQL tab provides a connection form (pre-filled from `.env`), Connect/Disconnect, schema viewer, and Column Value Sampling. `run_agent` is called with `dialect="MySQL"` and the sampled `value_reference` when MySQL is active. Backend (executor, schema_extractor, build_mysql_engine) already supported MySQL — this wired it into `app/main.py`.
+10. **Phase 10: MySQL exposed in UI** — the Data Source sidebar is now tabbed (Excel / MySQL). The MySQL tab provides a connection form (pre-filled from `.env`), Connect/Disconnect, schema viewer, and Column Value Sampling. `run_agent` is called with `dialect="MySQL"` and the sampled `value_reference` when MySQL is active. Backend (executor, schema_extractor, build_mysql_engine) already supported MySQL — this wired it into `app/main.py`. Also added input validation (host/database required, port 1–65535) before connecting.
+11. **Phase 11: Context-only SQL generation** — the app can now generate SQL from an uploaded context document alone, with no Excel/MySQL connection. `graph_agent` accepts `executor=None` and routes straight to END after `generate_sql` (no execution/retries). The full context-doc text is injected as the schema (`RAGRetriever.read_full_text()`), dialect fixed to MySQL, output is SQL only. UI gate in `main.py` opens when a context doc is loaded even without a data source.
 
 ## Possible Next Features
 - Export query results to CSV/Excel download button
