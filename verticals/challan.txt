@@ -1,0 +1,172 @@
+# Challan (Traffic Violation) Database — Schema Context for SQL Generation
+
+> ⚠️ **STARTER TEMPLATE — REPLACE WITH YOUR REAL SCHEMA.** The tables, columns,
+> and values below are a plausible starting point for a traffic-challan domain.
+> Edit them to match your actual database before relying on generated SQL.
+>
+> **Purpose of this file:** Authoritative context for translating natural-language
+> questions into SQL for the Challan vertical. When a question is ambiguous, prefer
+> the interpretation consistent with the relationships and value domains defined here.
+
+---
+
+## 1. Database Overview
+
+Operational database for **traffic-violation challans (e-challans)**. It tracks
+registered vehicles and their owners, challans issued for violations, the violation
+types and their fine amounts, payments against challans, and the officers / locations
+where challans were issued.
+
+### Table summary
+
+| # | Table | Grain (one row = ) | Key FKs |
+|---|-------|--------------------|---------|
+| 1 | `Vehicles` | one registered vehicle | `owner_id` |
+| 2 | `Owners` | one vehicle owner | — |
+| 3 | `Violation_Types` | one type of violation | — |
+| 4 | `Challans` | one issued challan | `vehicle_id`, `violation_id`, `officer_id` |
+| 5 | `Challan_Payments` | one payment against a challan | `challan_id` |
+| 6 | `Officers` | one enforcement officer | — |
+
+---
+
+## 2. Relationships (how to JOIN)
+
+```
+Owners ──< Vehicles ──< Challans >── Violation_Types
+                          │  │
+                          │  └── Officers
+                          └──< Challan_Payments
+```
+
+Join keys:
+
+- `Vehicles.owner_id`          → `Owners.owner_id`
+- `Challans.vehicle_id`        → `Vehicles.vehicle_id`
+- `Challans.violation_id`      → `Violation_Types.violation_id`
+- `Challans.officer_id`        → `Officers.officer_id`
+- `Challan_Payments.challan_id`→ `Challans.challan_id`
+
+---
+
+## 3. Table Definitions (DDL)
+
+```sql
+-- 1. Owners — vehicle owner details
+CREATE TABLE Owners (
+    owner_id      INT PRIMARY KEY,        -- Unique owner identifier
+    full_name     VARCHAR(100),           -- Owner name
+    city          VARCHAR(50),            -- Owner city
+    state         VARCHAR(50),            -- Owner state
+    mobile_number VARCHAR(15),            -- Contact number
+    email         VARCHAR(100)            -- Email ID
+);
+
+-- 2. Vehicles — registered vehicles
+CREATE TABLE Vehicles (
+    vehicle_id        INT PRIMARY KEY,    -- Unique vehicle identifier
+    owner_id          INT,                -- FK -> Owners
+    registration_no   VARCHAR(20),        -- e.g., 'HR26AB1234'
+    vehicle_type      VARCHAR(30),        -- Car / Bike / Truck / Auto / Bus
+    make_model        VARCHAR(60),        -- e.g., 'Maruti Swift'
+    registration_date DATE,               -- RTO registration date
+    CONSTRAINT fk_veh_owner FOREIGN KEY (owner_id) REFERENCES Owners(owner_id)
+);
+
+-- 3. Violation_Types — catalogue of violations and fines
+CREATE TABLE Violation_Types (
+    violation_id   INT PRIMARY KEY,       -- Unique violation type identifier
+    violation_name VARCHAR(100),          -- e.g., 'Over Speeding', 'No Helmet'
+    fine_amount    DECIMAL(10,2),         -- Standard fine (e.g., 1000.00)
+    severity       VARCHAR(20)            -- Minor / Major / Critical
+);
+
+-- 4. Challans — issued challans
+CREATE TABLE Challans (
+    challan_id    INT PRIMARY KEY,        -- Unique challan identifier
+    vehicle_id    INT,                    -- FK -> Vehicles
+    violation_id  INT,                    -- FK -> Violation_Types
+    officer_id    INT,                    -- FK -> Officers
+    challan_date  DATE,                   -- Date challan was issued
+    location      VARCHAR(120),           -- Where the challan was issued
+    fine_amount   DECIMAL(10,2),          -- Fine for this challan
+    challan_status VARCHAR(20),           -- Pending / Paid / Disputed / Cancelled
+    CONSTRAINT fk_ch_vehicle  FOREIGN KEY (vehicle_id)   REFERENCES Vehicles(vehicle_id),
+    CONSTRAINT fk_ch_viol     FOREIGN KEY (violation_id) REFERENCES Violation_Types(violation_id),
+    CONSTRAINT fk_ch_officer  FOREIGN KEY (officer_id)   REFERENCES Officers(officer_id)
+);
+
+-- 5. Challan_Payments — payments against challans
+CREATE TABLE Challan_Payments (
+    payment_id     INT PRIMARY KEY,       -- Unique payment identifier
+    challan_id     INT,                   -- FK -> Challans
+    payment_date   DATE,                  -- Date of payment
+    amount_paid    DECIMAL(10,2),         -- Amount paid
+    payment_mode   VARCHAR(20),           -- UPI / Card / NetBanking / Cash
+    payment_status VARCHAR(20),           -- Success / Failed / Pending
+    CONSTRAINT fk_pay_challan FOREIGN KEY (challan_id) REFERENCES Challans(challan_id)
+);
+
+-- 6. Officers — enforcement officers
+CREATE TABLE Officers (
+    officer_id   INT PRIMARY KEY,         -- Unique officer identifier
+    officer_name VARCHAR(100),            -- Officer name
+    badge_no     VARCHAR(30),             -- Badge number
+    city         VARCHAR(50)              -- Posting city
+);
+```
+
+---
+
+## 4. Categorical Value Domains (likely valid values)
+
+| Column | Likely values |
+|--------|---------------|
+| `Vehicles.vehicle_type` | `Car`, `Bike`, `Truck`, `Auto`, `Bus` |
+| `Violation_Types.severity` | `Minor`, `Major`, `Critical` |
+| `Challans.challan_status` | `Pending`, `Paid`, `Disputed`, `Cancelled` |
+| `Challan_Payments.payment_mode` | `UPI`, `Card`, `NetBanking`, `Cash` |
+| `Challan_Payments.payment_status` | `Success`, `Failed`, `Pending` |
+
+---
+
+## 5. Conventions & Hints for Query Generation
+
+- **Money columns** (`fine_amount`, `amount_paid`) are `DECIMAL` — use `SUM`, `AVG`, `ROUND`.
+- **Outstanding challans** = `challan_status = 'Pending'`.
+- **Recovery rate** = paid challans / total challans (use `LEFT JOIN` to `Challan_Payments`).
+- A challan links to its owner via `Challans -> Vehicles -> Owners`.
+- Prefer explicit `JOIN ... ON` and table aliases (e.g., `Challans c`, `Vehicles v`).
+
+---
+
+## 6. Example Natural-Language → SQL Patterns
+
+**"Total fines collected by payment mode this year."**
+```sql
+SELECT payment_mode, SUM(amount_paid) AS total_collected
+FROM Challan_Payments
+WHERE payment_status = 'Success'
+  AND payment_date >= '2024-01-01' AND payment_date < '2025-01-01'
+GROUP BY payment_mode
+ORDER BY total_collected DESC;
+```
+
+**"Top 5 violation types by number of challans."**
+```sql
+SELECT vt.violation_name, COUNT(*) AS challan_count
+FROM Challans c
+JOIN Violation_Types vt ON c.violation_id = vt.violation_id
+GROUP BY vt.violation_name
+ORDER BY challan_count DESC
+LIMIT 5;
+```
+
+**"List pending challans with owner name and registration number."**
+```sql
+SELECT o.full_name, v.registration_no, c.challan_date, c.fine_amount
+FROM Challans c
+JOIN Vehicles v ON c.vehicle_id = v.vehicle_id
+JOIN Owners   o ON v.owner_id   = o.owner_id
+WHERE c.challan_status = 'Pending';
+```

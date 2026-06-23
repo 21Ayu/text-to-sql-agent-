@@ -1,0 +1,179 @@
+# Parking Database — Schema Context for SQL Generation
+
+> ⚠️ **STARTER TEMPLATE — REPLACE WITH YOUR REAL SCHEMA.** The tables, columns,
+> and values below are a plausible starting point for a parking-management domain.
+> Edit them to match your actual database before relying on generated SQL.
+>
+> **Purpose of this file:** Authoritative context for translating natural-language
+> questions into SQL for the Parking vertical.
+
+---
+
+## 1. Database Overview
+
+Operational database for **parking management**. It tracks parking facilities (lots)
+and their slots, vehicles, individual parking sessions (entry/exit), the payments for
+those sessions, and prepaid monthly passes.
+
+### Table summary
+
+| # | Table | Grain (one row = ) | Key FKs |
+|---|-------|--------------------|---------|
+| 1 | `Parking_Lots` | one parking facility | — |
+| 2 | `Parking_Slots` | one slot within a lot | `lot_id` |
+| 3 | `Vehicles` | one vehicle | — |
+| 4 | `Parking_Sessions` | one park-in/park-out event | `lot_id`, `slot_id`, `vehicle_id` |
+| 5 | `Parking_Payments` | one payment for a session | `session_id` |
+| 6 | `Passes` | one prepaid monthly pass | `vehicle_id`, `lot_id` |
+
+---
+
+## 2. Relationships (how to JOIN)
+
+```
+Parking_Lots ──< Parking_Slots
+       │              │
+       ├──< Parking_Sessions >── Vehicles
+       │           └──< Parking_Payments
+       └──< Passes >── Vehicles
+```
+
+Join keys:
+
+- `Parking_Slots.lot_id`          → `Parking_Lots.lot_id`
+- `Parking_Sessions.lot_id`       → `Parking_Lots.lot_id`
+- `Parking_Sessions.slot_id`      → `Parking_Slots.slot_id`
+- `Parking_Sessions.vehicle_id`   → `Vehicles.vehicle_id`
+- `Parking_Payments.session_id`   → `Parking_Sessions.session_id`
+- `Passes.vehicle_id`             → `Vehicles.vehicle_id`
+- `Passes.lot_id`                 → `Parking_Lots.lot_id`
+
+---
+
+## 3. Table Definitions (DDL)
+
+```sql
+-- 1. Parking_Lots — parking facilities
+CREATE TABLE Parking_Lots (
+    lot_id        INT PRIMARY KEY,        -- Unique lot identifier
+    lot_name      VARCHAR(120),           -- e.g., 'City Centre Mall P1'
+    city          VARCHAR(50),            -- City
+    total_slots   INT,                    -- Capacity
+    hourly_rate   DECIMAL(8,2)            -- Base hourly rate
+);
+
+-- 2. Parking_Slots — individual slots
+CREATE TABLE Parking_Slots (
+    slot_id     INT PRIMARY KEY,          -- Unique slot identifier
+    lot_id      INT,                      -- FK -> Parking_Lots
+    slot_code   VARCHAR(20),              -- e.g., 'B2-114'
+    slot_type   VARCHAR(20),              -- Car / Bike / EV / Handicap
+    CONSTRAINT fk_slot_lot FOREIGN KEY (lot_id) REFERENCES Parking_Lots(lot_id)
+);
+
+-- 3. Vehicles — vehicles using parking
+CREATE TABLE Vehicles (
+    vehicle_id      INT PRIMARY KEY,      -- Unique vehicle identifier
+    registration_no VARCHAR(20),          -- e.g., 'HR26AB1234'
+    vehicle_type    VARCHAR(20)           -- Car / Bike / EV
+);
+
+-- 4. Parking_Sessions — entry/exit events
+CREATE TABLE Parking_Sessions (
+    session_id    INT PRIMARY KEY,        -- Unique session identifier
+    lot_id        INT,                    -- FK -> Parking_Lots
+    slot_id       INT,                    -- FK -> Parking_Slots
+    vehicle_id    INT,                    -- FK -> Vehicles
+    entry_time    DATETIME,               -- Park-in timestamp
+    exit_time     DATETIME,               -- Park-out timestamp (NULL if still parked)
+    duration_minutes INT,                 -- Parked duration in minutes
+    session_status VARCHAR(20),           -- Active / Completed / Overstay
+    CONSTRAINT fk_sess_lot     FOREIGN KEY (lot_id)     REFERENCES Parking_Lots(lot_id),
+    CONSTRAINT fk_sess_slot    FOREIGN KEY (slot_id)    REFERENCES Parking_Slots(slot_id),
+    CONSTRAINT fk_sess_vehicle FOREIGN KEY (vehicle_id) REFERENCES Vehicles(vehicle_id)
+);
+
+-- 5. Parking_Payments — payments for sessions
+CREATE TABLE Parking_Payments (
+    payment_id     INT PRIMARY KEY,       -- Unique payment identifier
+    session_id     INT,                   -- FK -> Parking_Sessions
+    payment_date   DATE,                  -- Date of payment
+    amount_paid    DECIMAL(8,2),          -- Amount paid
+    payment_mode   VARCHAR(20),           -- UPI / Card / Cash / Wallet
+    payment_status VARCHAR(20),           -- Success / Failed / Pending
+    CONSTRAINT fk_pp_session FOREIGN KEY (session_id) REFERENCES Parking_Sessions(session_id)
+);
+
+-- 6. Passes — prepaid monthly passes
+CREATE TABLE Passes (
+    pass_id     INT PRIMARY KEY,          -- Unique pass identifier
+    vehicle_id  INT,                      -- FK -> Vehicles
+    lot_id      INT,                      -- FK -> Parking_Lots
+    start_date  DATE,                     -- Pass validity start
+    end_date    DATE,                     -- Pass validity end
+    amount      DECIMAL(8,2),             -- Pass price
+    pass_status VARCHAR(20),              -- Active / Expired / Cancelled
+    CONSTRAINT fk_pass_vehicle FOREIGN KEY (vehicle_id) REFERENCES Vehicles(vehicle_id),
+    CONSTRAINT fk_pass_lot     FOREIGN KEY (lot_id)     REFERENCES Parking_Lots(lot_id)
+);
+```
+
+---
+
+## 4. Categorical Value Domains (likely valid values)
+
+| Column | Likely values |
+|--------|---------------|
+| `Parking_Slots.slot_type` | `Car`, `Bike`, `EV`, `Handicap` |
+| `Vehicles.vehicle_type` | `Car`, `Bike`, `EV` |
+| `Parking_Sessions.session_status` | `Active`, `Completed`, `Overstay` |
+| `Parking_Payments.payment_mode` | `UPI`, `Card`, `Cash`, `Wallet` |
+| `Parking_Payments.payment_status` | `Success`, `Failed`, `Pending` |
+| `Passes.pass_status` | `Active`, `Expired`, `Cancelled` |
+
+---
+
+## 5. Conventions & Hints for Query Generation
+
+- **Money columns** (`hourly_rate`, `amount_paid`, `amount`) are `DECIMAL` — use `SUM`, `AVG`, `ROUND`.
+- `entry_time` / `exit_time` are `DATETIME`; use `DATE(entry_time)` for day grouping.
+- **Currently parked** = `session_status = 'Active'` (or `exit_time IS NULL`).
+- **Occupancy** for a lot = active sessions / `total_slots`.
+- **Parking revenue** = `SUM(amount_paid)` over `payment_status = 'Success'`.
+- Prefer explicit `JOIN ... ON` and table aliases.
+
+---
+
+## 6. Example Natural-Language → SQL Patterns
+
+**"Total parking revenue per lot this month."**
+```sql
+SELECT pl.lot_name, SUM(pp.amount_paid) AS revenue
+FROM Parking_Payments pp
+JOIN Parking_Sessions ps ON pp.session_id = ps.session_id
+JOIN Parking_Lots pl     ON ps.lot_id     = pl.lot_id
+WHERE pp.payment_status = 'Success'
+  AND pp.payment_date >= '2024-06-01' AND pp.payment_date < '2024-07-01'
+GROUP BY pl.lot_name
+ORDER BY revenue DESC;
+```
+
+**"Average parking duration by vehicle type."**
+```sql
+SELECT v.vehicle_type, AVG(ps.duration_minutes) AS avg_minutes
+FROM Parking_Sessions ps
+JOIN Vehicles v ON ps.vehicle_id = v.vehicle_id
+WHERE ps.session_status = 'Completed'
+GROUP BY v.vehicle_type
+ORDER BY avg_minutes DESC;
+```
+
+**"Count of currently parked vehicles per lot."**
+```sql
+SELECT pl.lot_name, COUNT(*) AS parked_now
+FROM Parking_Sessions ps
+JOIN Parking_Lots pl ON ps.lot_id = pl.lot_id
+WHERE ps.session_status = 'Active'
+GROUP BY pl.lot_name
+ORDER BY parked_now DESC;
+```
